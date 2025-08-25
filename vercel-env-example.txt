@@ -1,0 +1,62 @@
+# 🔐 Variáveis de Ambiente para o Vercel
+# 
+# Copie estas variáveis e configure no painel do Vercel:
+# Settings > Environment Variables
+
+# ===== SUPABASE =====
+SUPABASE_URL=https://seu-projeto.supabase.co
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+# ===== SERVIDOR =====
+PORT=3001
+NODE_ENV=production
+JWT_SECRET=seu_jwt_secret_super_seguro_de_pelo_menos_32_caracteres
+
+# ===== FRONTEND =====
+FRONTEND_URL=https://rosita-floral-elegance.vercel.app
+
+# ===== APIs EXTERNAS =====
+FRETE_API_URL=https://api.frete.com
+FRETE_API_KEY=sua_chave_api_frete_aqui
+
+# ===== WEBHOOKS =====
+PAYMENT_WEBHOOK_SECRET=seu_webhook_secret_para_pagamentos
+
+# ===== OAUTH (OPCIONAL) =====
+GOOGLE_CLIENT_ID=seu_google_client_id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=seu_google_client_secret
+FACEBOOK_APP_ID=seu_facebook_app_id
+FACEBOOK_APP_SECRET=seu_facebook_app_secret
+
+# ===== INSTRUÇÕES =====
+# 
+# 1. Acesse https://vercel.com/dashboard
+# 2. Selecione seu projeto
+# 3. Vá em Settings > Environment Variables
+# 4. Adicione cada variável acima
+# 5. Certifique-se de marcar todas as opções:
+#    - Production
+#    - Preview
+#    - Development
+# 
+# ⚠️  IMPORTANTE:
+# - Nunca commite este arquivo com valores reais
+# - Use valores seguros para JWT_SECRET (32+ caracteres)
+# - Mantenha SUPABASE_SERVICE_ROLE_KEY em segredo
+# - Configure FRONTEND_URL com a URL real do seu frontend
+# 
+# 📋 COMO OBTER AS CHAVES DO SUPABASE:
+# 1. Acesse https://supabase.com/dashboard
+# 2. Selecione seu projeto
+# 3. Vá em Settings > API
+# 4. Copie:
+#    - Project URL → SUPABASE_URL
+#    - anon public → SUPABASE_ANON_KEY
+#    - service_role → SUPABASE_SERVICE_ROLE_KEY
+# 
+# 🔑 GERAR JWT_SECRET SEGURO:
+# Use um dos métodos abaixo:
+# - Node.js: require('crypto').randomBytes(32).toString('hex')
+# - Online: https://generate-secret.vercel.app/32
+# - Terminal: openssl rand -hex 32
