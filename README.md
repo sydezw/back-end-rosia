@@ -12,6 +12,19 @@ Backend completo para a loja online Rosita Floral Elegance, desenvolvido em Node
 - **CORS** - Controle de acesso entre origens
 - **Rate Limiting** - Proteção contra spam
 
+## 🚀 Funcionalidades Implementadas
+
+- ✅ **Autenticação completa** (registro, login, logout, social login)
+- ✅ **Gestão de produtos** (listagem, detalhes, busca)
+- ✅ **Carrinho e checkout** (adicionar itens, calcular totais)
+- ✅ **Sistema de pedidos** (criar, listar, acompanhar)
+- ✅ **Cálculo de frete** (integração com APIs de entrega)
+- ✅ **Webhook de pagamentos** (confirmação automática)
+- ✅ **Upload de imagens** (Supabase Storage, otimização automática)
+- ✅ **Área administrativa** (CRUD completo de produtos com imagens)
+- ✅ **Middleware de segurança** (CORS, rate limiting, helmet)
+- ✅ **Tratamento de erros** (logs detalhados, respostas padronizadas)
+
 ## 📁 Estrutura do Projeto
 
 ```

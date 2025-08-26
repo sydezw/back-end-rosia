@@ -11,10 +11,15 @@ const orderRoutes = require('./routes/orders');
 const checkoutRoutes = require('./routes/checkout');
 const shippingRoutes = require('./routes/shipping');
 const webhookRoutes = require('./routes/webhook');
+const uploadRoutes = require('./routes/upload');
+const adminRoutes = require('./routes/admin');
 
 // Importar middlewares
 const errorHandler = require('./middleware/errorHandler');
 const { authenticateUser } = require('./middleware/auth');
+
+// Importar configuração do storage
+const { createBucketIfNotExists } = require('./config/storage');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -50,6 +55,8 @@ app.use('/webhook', webhookRoutes);
 // Rotas protegidas (requerem autenticação)
 app.use('/orders', authenticateUser, orderRoutes);
 app.use('/checkout', authenticateUser, checkoutRoutes);
+app.use('/upload', uploadRoutes);
+app.use('/admin', adminRoutes);
 
 // Rota de health check
 app.get('/health', (req, res) => {
@@ -71,11 +78,26 @@ app.use('*', (req, res) => {
 // Middleware de tratamento de erros
 app.use(errorHandler);
 
-// Iniciar servidor
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
-  console.log(`🌍 Ambiente: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`📱 Frontend URL: ${process.env.FRONTEND_URL}`);
-});
+// Inicializar storage e iniciar servidor
+const initializeServer = async () => {
+  try {
+    // Criar bucket do Supabase Storage se não existir
+    await createBucketIfNotExists();
+    console.log('✅ Storage configurado com sucesso');
+  } catch (error) {
+    console.error('❌ Erro ao configurar storage:', error.message);
+    console.log('⚠️  Servidor continuará sem storage configurado');
+  }
+
+  // Iniciar servidor
+  app.listen(PORT, () => {
+    console.log(`🚀 Servidor rodando na porta ${PORT}`);
+    console.log(`🌍 Ambiente: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`📱 Frontend URL: ${process.env.FRONTEND_URL}`);
+    console.log(`📸 Upload de imagens: Habilitado`);
+  });
+};
+
+initializeServer();
 
 module.exports = app;

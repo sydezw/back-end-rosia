@@ -11,6 +11,10 @@ CREATE TABLE IF NOT EXISTS products (
   category VARCHAR(100),
   image_url TEXT,
   images JSONB DEFAULT '[]'::jsonb, -- Array de URLs de imagens
+  colors JSONB DEFAULT '[]'::jsonb, -- Array de cores disponíveis
+  sizes JSONB DEFAULT '[]'::jsonb, -- Array de tamanhos disponíveis
+  material VARCHAR(100), -- Material da roupa (algodão, poliéster, etc.)
+  brand VARCHAR(100), -- Marca da roupa
   weight DECIMAL(8,3) DEFAULT 0.5, -- Peso em kg
   volume DECIMAL(8,3) DEFAULT 0.001, -- Volume em litros
   active BOOLEAN DEFAULT true,
@@ -98,6 +102,9 @@ CREATE INDEX IF NOT EXISTS idx_products_active ON products(active);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
 CREATE INDEX IF NOT EXISTS idx_products_featured ON products(featured);
 CREATE INDEX IF NOT EXISTS idx_products_created_at ON products(created_at);
+CREATE INDEX IF NOT EXISTS idx_products_colors ON products USING GIN (colors);
+CREATE INDEX IF NOT EXISTS idx_products_sizes ON products USING GIN (sizes);
+CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand);
 
 CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
@@ -171,13 +178,13 @@ CREATE POLICY "Usuários podem ver seus próprios usos de cupons" ON coupon_uses
 CREATE POLICY "Usuários podem criar usos de cupons" ON coupon_uses
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 
--- Inserir alguns produtos de exemplo
-INSERT INTO products (name, description, price, stock, category, image_url, weight, volume) VALUES
-('Buquê de Rosas Vermelhas', 'Lindo buquê com 12 rosas vermelhas frescas', 89.90, 15, 'Buquês', 'https://example.com/rosas-vermelhas.jpg', 0.8, 0.002),
-('Arranjo de Lírios Brancos', 'Elegante arranjo com lírios brancos em vaso de vidro', 125.00, 8, 'Arranjos', 'https://example.com/lirios-brancos.jpg', 1.2, 0.003),
-('Buquê de Girassóis', 'Alegre buquê com 8 girassóis frescos', 65.50, 20, 'Buquês', 'https://example.com/girassois.jpg', 0.6, 0.002),
-('Cesta de Flores Mistas', 'Cesta rústica com variedade de flores coloridas', 95.00, 12, 'Cestas', 'https://example.com/cesta-mistas.jpg', 1.5, 0.004),
-('Orquídea Phalaenopsis', 'Orquídea branca em vaso decorativo', 78.00, 25, 'Plantas', 'https://example.com/orquidea.jpg', 0.9, 0.001);
+-- Inserir alguns produtos de exemplo (roupas)
+INSERT INTO products (name, description, price, stock, category, image_url, colors, sizes, material, brand, weight, volume) VALUES
+('Camiseta Básica Feminina', 'Camiseta 100% algodão com modelagem feminina', 29.90, 50, 'Camisetas', 'https://example.com/camiseta-basica.jpg', '["Branco", "Preto", "Azul", "Rosa"]', '["PP", "P", "M", "G", "GG"]', 'Algodão', 'Rosita', 0.2, 0.001),
+('Vestido Floral Elegante', 'Vestido midi com estampa floral delicada', 89.90, 25, 'Vestidos', 'https://example.com/vestido-floral.jpg', '["Azul", "Rosa", "Verde"]', '["P", "M", "G", "GG"]', 'Viscose', 'Rosita', 0.3, 0.002),
+('Calça Jeans Skinny', 'Calça jeans com elastano para maior conforto', 79.90, 30, 'Calças', 'https://example.com/calca-jeans.jpg', '["Azul Escuro", "Azul Claro", "Preto"]', '["36", "38", "40", "42", "44"]', 'Algodão/Elastano', 'Rosita', 0.5, 0.003),
+('Blusa de Seda Premium', 'Blusa elegante em seda natural', 149.90, 15, 'Blusas', 'https://example.com/blusa-seda.jpg', '["Branco", "Nude", "Preto", "Azul Marinho"]', '["P", "M", "G"]', 'Seda', 'Rosita Premium', 0.15, 0.001),
+('Saia Midi Plissada', 'Saia midi com pregas elegantes', 69.90, 20, 'Saias', 'https://example.com/saia-plissada.jpg', '["Preto", "Azul Marinho", "Vinho", "Camel"]', '["P", "M", "G", "GG"]', 'Poliéster', 'Rosita', 0.25, 0.002);
 
 -- Inserir alguns cupons de exemplo
 INSERT INTO coupons (code, description, discount_type, discount_value, min_order_value, max_uses, valid_until) VALUES
