@@ -13,6 +13,7 @@ const shippingRoutes = require('./routes/shipping');
 const webhookRoutes = require('./routes/webhook');
 const uploadRoutes = require('./routes/upload');
 const adminRoutes = require('./routes/admin');
+const paymentRoutes = require('./routes/payment');
 
 // Importar middlewares
 const errorHandler = require('./middleware/errorHandler');
@@ -57,6 +58,7 @@ app.use('/orders', authenticateUser, orderRoutes);
 app.use('/checkout', authenticateUser, checkoutRoutes);
 app.use('/upload', uploadRoutes);
 app.use('/admin', adminRoutes);
+app.use('/payment', paymentRoutes);
 
 // Rota de health check
 app.get('/health', (req, res) => {

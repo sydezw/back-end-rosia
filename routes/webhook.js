@@ -40,6 +40,12 @@ router.post('/payment', async (req, res, next) => {
 
     // Processar diferentes tipos de eventos
     const eventType = webhookData.type || webhookData.event_type || webhookData.action;
+    
+    // Verificar se é webhook do Mercado Pago
+    if (webhookData.data && webhookData.data.id) {
+      return await handleMercadoPagoWebhook(webhookData, res);
+    }
+    
     const orderId = extractOrderId(webhookData);
 
     if (!orderId) {
@@ -310,6 +316,100 @@ async function handlePaymentRefunded(orderId, webhookData) {
   } catch (error) {
     console.error('Erro ao processar reembolso:', error);
     throw error;
+  }
+}
+
+/**
+ * Processar webhook específico do Mercado Pago
+ */
+async function handleMercadoPagoWebhook(webhookData, res) {
+  try {
+    const { getMercadoPago } = require('../config/mercadopago');
+    const mercadoPago = getMercadoPago();
+    
+    const paymentId = webhookData.data.id;
+    const eventType = webhookData.type;
+    
+    console.log(`Webhook Mercado Pago: ${eventType} para pagamento ${paymentId}`);
+    
+    // Consultar dados atualizados do pagamento
+    const paymentData = await mercadoPago.getPayment(paymentId);
+    
+    // Buscar pedido pelo payment_id
+    const { data: order, error: orderError } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('payment_id', paymentId)
+      .single();
+    
+    if (orderError || !order) {
+      console.log(`Pedido não encontrado para pagamento ${paymentId}`);
+      return res.status(200).json({ message: 'Pagamento não associado a pedido' });
+    }
+    
+    const orderId = order.id;
+    
+    // Atualizar dados do pagamento no pedido
+    await supabase
+      .from('orders')
+      .update({
+        payment_status: paymentData.status,
+        payment_data: {
+          mp_payment_id: paymentData.id,
+          status: paymentData.status,
+          status_detail: paymentData.status_detail,
+          payment_method_id: paymentData.payment_method_id,
+          installments: paymentData.installments,
+          transaction_amount: paymentData.transaction_amount,
+          date_approved: paymentData.date_approved,
+          webhook_received_at: new Date().toISOString()
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', orderId);
+    
+    // Processar baseado no status do pagamento
+    switch (paymentData.status) {
+      case 'approved':
+        await handlePaymentApproved(orderId, paymentData);
+        console.log(`Pagamento aprovado via webhook: ${paymentId}`);
+        break;
+        
+      case 'rejected':
+      case 'cancelled':
+        await handlePaymentRejected(orderId, paymentData);
+        console.log(`Pagamento rejeitado via webhook: ${paymentId}`);
+        break;
+        
+      case 'refunded':
+        await handlePaymentRefunded(orderId, paymentData);
+        console.log(`Pagamento reembolsado via webhook: ${paymentId}`);
+        break;
+        
+      case 'pending':
+      case 'in_process':
+        // Manter status pendente
+        console.log(`Pagamento pendente via webhook: ${paymentId}`);
+        break;
+        
+      default:
+        console.log(`Status não processado: ${paymentData.status} para pagamento ${paymentId}`);
+        break;
+    }
+    
+    return res.status(200).json({
+      message: 'Webhook Mercado Pago processado com sucesso',
+      payment_id: paymentId,
+      order_id: orderId,
+      status: paymentData.status
+    });
+    
+  } catch (error) {
+    console.error('Erro ao processar webhook Mercado Pago:', error);
+    return res.status(500).json({
+      error: 'Erro interno no processamento do webhook',
+      code: 'WEBHOOK_PROCESSING_ERROR'
+    });
   }
 }
 
