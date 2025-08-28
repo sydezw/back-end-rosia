@@ -11,7 +11,7 @@ const {
   deleteMultipleImages,
   generateUniqueFilename
 } = require('../config/storage');
-const { supabase } = require('../config/supabase');
+const { supabase, supabaseAdmin } = require('../config/supabase');
 
 /**
  * POST /admin/auth/login
@@ -28,7 +28,7 @@ router.post('/auth/login', async (req, res, next) => {
     }
 
     // Verificar se o email existe na tabela admin_users
-    const { data: adminCheck, error: adminError } = await supabase
+    const { data: adminCheck, error: adminError } = await supabaseAdmin
       .from('admin_users')
       .select('id, email, user_id, active')
       .eq('email', email)
@@ -43,7 +43,7 @@ router.post('/auth/login', async (req, res, next) => {
     }
 
     // Buscar dados do usuário no Supabase Auth
-    const { data: userData, error: userError } = await supabase.auth.admin.getUserById(adminCheck.user_id);
+    const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(adminCheck.user_id);
     
     if (userError || !userData.user) {
       return res.status(404).json({
