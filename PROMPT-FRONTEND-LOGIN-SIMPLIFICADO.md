@@ -6,7 +6,7 @@ O backend da aplicação Rosia foi atualizado com um **sistema de login administ
 
 ## URL da API
 
-**Produção:** `https://back-end-rosia.vercel.app`
+**Produção:** `https://back-end-rosia02.vercel.app`
 
 ## Sistema de Login Simplificado
 
@@ -27,6 +27,8 @@ O backend da aplicação Rosia foi atualizado com um **sistema de login administ
   "success": true,
   "user": {
     "id": "uuid-do-usuario",
+
+
     "email": "suporte@rosia.com.br",
     "name": "Nome do Admin",
     "avatar": "url-do-avatar",
