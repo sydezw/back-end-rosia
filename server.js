@@ -63,6 +63,25 @@ app.use('/upload', uploadRoutes);
 app.use('/admin', adminRoutes);
 app.use('/payment', paymentRoutes);
 
+// Rota raiz
+app.get('/', (req, res) => {
+  res.json({
+    name: 'Rosia API',
+    version: '1.0.0',
+    status: 'Online',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    endpoints: {
+      auth: '/auth',
+      products: '/products',
+      orders: '/orders',
+      checkout: '/checkout',
+      admin: '/admin',
+      health: '/health'
+    }
+  });
+});
+
 // Rota de health check
 app.get('/health', (req, res) => {
   res.json({ 
