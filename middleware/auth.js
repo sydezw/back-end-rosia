@@ -98,7 +98,6 @@ const authenticateAdmin = async (req, res, next) => {
         }
         
         // Verificar se o admin ainda está ativo
-        console.log('Verificando admin:', { adminId, email });
         const { data: adminCheck, error: adminError } = await supabase
           .from('admin_users')
           .select('id, email, user_id')
@@ -107,10 +106,7 @@ const authenticateAdmin = async (req, res, next) => {
           .eq('active', true)
           .single();
 
-        console.log('Resultado da consulta admin:', { adminCheck, adminError });
-        
         if (adminError || !adminCheck) {
-          console.log('Admin não encontrado:', { adminError, adminCheck });
           return res.status(403).json({ 
             error: 'Admin não encontrado ou inativo',
             code: 'ADMIN_INACTIVE'
