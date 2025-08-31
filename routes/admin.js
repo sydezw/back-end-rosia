@@ -57,6 +57,7 @@ router.post('/auth/login', async (req, res, next) => {
 
     res.json({
       success: true,
+      admin_token: adminToken,
       user: {
         id: adminCheck.user_id,
         email: adminCheck.email,
@@ -67,7 +68,6 @@ router.post('/auth/login', async (req, res, next) => {
         created_at: userData.user.created_at
       },
       session: {
-        admin_token: adminToken,
         expires_at: Date.now() + (24 * 60 * 60 * 1000) // 24 horas
       }
     });
