@@ -5,10 +5,16 @@
 const fs = require('fs');
 const path = require('path');
 
-// Criar diretório de logs se não existir
-const logsDir = path.join(__dirname, '..', 'logs');
-if (!fs.existsSync(logsDir)) {
-  fs.mkdirSync(logsDir, { recursive: true });
+// Verificar se estamos em ambiente serverless (Vercel)
+const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME;
+
+// Criar diretório de logs apenas em ambiente local
+let logsDir = null;
+if (!isServerless) {
+  logsDir = path.join(__dirname, '..', 'logs');
+  if (!fs.existsSync(logsDir)) {
+    fs.mkdirSync(logsDir, { recursive: true });
+  }
 }
 
 // Função para escrever logs em arquivo
@@ -20,15 +26,17 @@ function writeLog(level, message, data = null) {
     message,
     data
   };
-  
-  const logLine = JSON.stringify(logEntry) + '\n';
-  const logFile = path.join(logsDir, `${new Date().toISOString().split('T')[0]}.log`);
-  
-  fs.appendFileSync(logFile, logLine);
-  
-  // Também exibir no console em desenvolvimento
-  if (process.env.NODE_ENV !== 'production') {
-    console.log(`[${level.toUpperCase()}] ${timestamp}: ${message}`, data || '');
+
+  // Log no console sempre (necessário para Vercel)
+  console.log(`[${timestamp}] ${level}: ${message}`, data || '');
+
+  // Escrever em arquivo apenas em ambiente local
+  if (!isServerless && logsDir) {
+    const today = new Date().toISOString().split('T')[0];
+    const logFile = path.join(logsDir, `${today}.log`);
+    
+    const logLine = JSON.stringify(logEntry) + '\n';
+    fs.appendFileSync(logFile, logLine);
   }
 }
 

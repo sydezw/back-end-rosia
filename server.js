@@ -37,6 +37,10 @@ const limiter = rateLimit({
 app.use(helmet());
 app.use(limiter);
 app.use(requestLogger);
+
+// Servir arquivos estáticos
+app.use(express.static('public'));
+
 app.use(cors({
   origin: [
     process.env.FRONTEND_URL,
