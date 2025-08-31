@@ -55,15 +55,23 @@ router.post('/auth/login', async (req, res, next) => {
     // Gerar um token simples para a sessão admin (você pode usar JWT aqui se preferir)
     const adminToken = Buffer.from(`${adminCheck.id}:${adminCheck.email}:${Date.now()}`).toString('base64');
 
+    // Atualizar last_login
+    await supabaseAdmin
+      .from('admin_users')
+      .update({ last_login: new Date().toISOString() })
+      .eq('id', adminCheck.id);
+
     res.json({
       success: true,
       user: {
         id: adminCheck.user_id,
         email: adminCheck.email,
         name: userData.user.user_metadata?.name || userData.user.user_metadata?.full_name || 'Admin',
-        avatar: userData.user.user_metadata?.avatar_url,
-        isAdmin: true,
-        adminId: adminCheck.id
+        role: "admin",
+        permissions: ["products.create", "products.read", "products.update", "products.delete", "orders.read", "orders.update", "dashboard.read"],
+        avatar: userData.user.user_metadata?.avatar_url || null,
+        created_at: userData.user.created_at,
+        last_login: new Date().toISOString()
       },
       session: {
         admin_token: adminToken,
@@ -422,7 +430,7 @@ router.get('/products', async (req, res) => {
         page: parseInt(page),
         limit: parseInt(limit),
         total: count,
-        pages: Math.ceil(count / limit)
+        totalPages: Math.ceil(count / limit)
       }
     });
   } catch (error) {

@@ -6,7 +6,7 @@ Este guia explica toda a estrutura do banco de dados, como o frontend deve se co
 
 ## 🔗 URLs da API
 
-**Produção:** `https://back-end-rosia-41zn6wu6w-rosita933751-2137s-projects.vercel.app`
+**Produção:** `https://back-end-rosia.vercel.app`
 **Local:** `http://localhost:3001`
 
 ## 🗃️ Estrutura do Banco de Dados

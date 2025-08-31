@@ -50,7 +50,7 @@ router.get('/', async (req, res, next) => {
         page: parseInt(page),
         limit: parseInt(limit),
         total: totalCount,
-        pages: Math.ceil(totalCount / limit)
+        totalPages: Math.ceil(totalCount / limit)
       }
     });
   } catch (error) {
