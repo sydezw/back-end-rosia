@@ -45,9 +45,9 @@ export function useRegister() {
       }
 
       const { data } = await api.post<RegisterResponse>('/auth/register', {
-        name: userData.name.trim(),
+        nome: userData.name.trim(),
         email: userData.email.toLowerCase().trim(),
-        password: userData.password
+        senha: userData.password
       });
 
       // Se retornou sessão, salvar tokens

@@ -14,6 +14,7 @@ const webhookRoutes = require('./routes/webhook');
 const uploadRoutes = require('./routes/upload');
 const adminRoutes = require('./routes/admin');
 const paymentRoutes = require('./routes/payment');
+const profileRoutes = require('./routes/profile');
 
 // Importar middlewares
 const errorHandler = require('./middleware/errorHandler');
@@ -46,7 +47,7 @@ app.use(cors({
     process.env.FRONTEND_URL,
     process.env.FRONTEND_URL_LOCAL, 
     'http://localhost:3000', 
-    'http://localhost:8080',
+    'https://www.rosia.com.br',
     'http://192.168.0.13:8080',
     'http://127.0.0.1:8080'
   ].filter(Boolean),
@@ -56,25 +57,38 @@ app.use(cors({
   optionsSuccessStatus: 200
 }));
 
-// Middleware para webhook (antes do express.json para raw body)
-app.use('/webhook', express.raw({ type: 'application/json' }));
-
-// Middleware para parsing JSON
+// Middlewares de parsing (devem vir antes das rotas)
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Rotas públicas
+// Middleware específico para webhook (após express.json para não interferir)
+app.use('/webhook', express.raw({ type: 'application/json' }));
+
+// Rotas com prefixo /api
+app.use('/api/auth', authRoutes);
+app.use('/api/products', productRoutes);
+app.use('/api/shipping', shippingRoutes);
+app.use('/api/webhook', webhookRoutes);
+
+// Rotas protegidas (requerem autenticação)
+app.use('/api/orders', authenticateUser, orderRoutes);
+app.use('/api/checkout', authenticateUser, checkoutRoutes);
+app.use('/api/upload', uploadRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/payment', paymentRoutes);
+app.use('/api/profile', profileRoutes);
+
+// Rotas sem prefixo /api (para compatibilidade)
 app.use('/auth', authRoutes);
 app.use('/products', productRoutes);
 app.use('/shipping', shippingRoutes);
 app.use('/webhook', webhookRoutes);
-
-// Rotas protegidas (requerem autenticação)
 app.use('/orders', authenticateUser, orderRoutes);
 app.use('/checkout', authenticateUser, checkoutRoutes);
 app.use('/upload', uploadRoutes);
 app.use('/admin', adminRoutes);
 app.use('/payment', paymentRoutes);
+app.use('/profile', profileRoutes);
 
 // Rota raiz
 app.get('/', (req, res) => {
@@ -90,6 +104,10 @@ app.get('/', (req, res) => {
       orders: '/orders',
       checkout: '/checkout',
       admin: '/admin',
+      profile: '/profile',
+      upload: '/upload',
+      payment: '/payment',
+      shipping: '/shipping',
       health: '/health'
     }
   });
