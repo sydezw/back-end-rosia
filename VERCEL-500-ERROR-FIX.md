@@ -132,12 +132,33 @@ app.use((req, res, next) => {
 3. Verificar se popup abre corretamente
 4. Verificar se não há erros de CORS no console
 
+## Correção CORS - localhost:8080
+
+**Data:** 2025-01-09  
+**Commit:** 8addf23
+
+### Problema
+- Frontend rodando em `http://localhost:8080` estava sendo bloqueado por política CORS
+- Erro: "Access to fetch at 'https://back-end-rosia02.vercel.app/api/auth/login/google' from origin 'http://localhost:8080' has been blocked by CORS policy"
+
+### Solução
+- Adicionado `'http://localhost:8080'` às origens CORS permitidas no `server.js`
+- Localização: linha 59 do arquivo `server.js`
+
+### Teste de Verificação
+```bash
+Invoke-WebRequest -Uri "https://back-end-rosia02.vercel.app/health" -Method GET -Headers @{"Origin"="http://localhost:8080"} -UseBasicParsing
+```
+
+**Resultado:** ✅ Header `Access-Control-Allow-Origin: http://localhost:8080` presente na resposta
+
 ## 🔍 Próximos Passos
 
-1. **✅ Testar fluxo completo de autenticação**
-2. **✅ Verificar se upload de imagens funciona (lazy loading)**
-3. **✅ Monitorar logs por 24h**
-4. **✅ Testar em diferentes navegadores**
+1. **Configurar Google OAuth Console** para aceitar localhost:8080 como origem autorizada
+2. **Monitorar logs do Vercel** para confirmar que não há mais erros FUNCTION_INVOCATION_FAILED
+3. **Testar todas as rotas** para garantir funcionamento correto
+4. **Verificar performance** após a correção
+5. **Documentar** outras possíveis causas de erro 500 para referência futura
 
 ## 📝 Notas Técnicas
 
