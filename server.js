@@ -55,6 +55,7 @@ app.use(cors({
     process.env.FRONTEND_URL_LOCAL, 
     'http://localhost:3000',
     'http://localhost:5173', // Vite dev server
+    'http://localhost:8080', // Frontend local na porta 8080
     'https://www.rosia.com.br',
     'https://rosia.com.br', // Domínio sem www
     'https://rosialoja-front-rosialastcommit.vercel.app', // Frontend na Vercel
