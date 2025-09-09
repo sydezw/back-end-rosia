@@ -46,8 +46,9 @@ app.use(express.static('public'));
 
 // Headers de segurança para resolver Cross-Origin-Opener-Policy
 app.use((req, res, next) => {
-  res.header('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  res.header('Cross-Origin-Opener-Policy', 'unsafe-none');
   res.header('Cross-Origin-Embedder-Policy', 'unsafe-none');
+  res.header('Cross-Origin-Resource-Policy', 'cross-origin');
   next();
 });
 
@@ -63,6 +64,8 @@ app.use(cors({
     'https://rosialoja-front-rosialastcommit.vercel.app', // Frontend na Vercel
     'https://back-end-rosia02.vercel.app', // Backend na Vercel
     'https://nsazbeovtmmetpiyokqc.supabase.co', // Supabase para OAuth
+    'https://accounts.google.com', // Google OAuth
+    'https://apis.google.com', // Google APIs
     'http://192.168.0.13:8080',
     'http://127.0.0.1:8080'
   ].filter(Boolean),
@@ -73,7 +76,9 @@ app.use(cors({
     'Authorization', 
     'X-Requested-With',
     'Accept',
-    'Origin'
+    'Origin',
+    'Access-Control-Allow-Origin',
+    'Access-Control-Allow-Credentials'
   ],
   optionsSuccessStatus: 200
 }));

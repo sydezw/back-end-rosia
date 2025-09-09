@@ -175,27 +175,28 @@ router.post('/login/google', async (req, res, next) => {
       });
     }
 
-    // Verificar token do Google com Supabase
-    const { data, error } = await supabase.auth.signInWithIdToken({
-      provider: 'google',
-      token: token
-    });
-
-    if (error) {
+    // Verificar token do Google
+    const payload = await verifyGoogleToken(token);
+    
+    if (!payload) {
       return res.status(401).json({
-        error: 'Token do Google inválido',
-        details: error.message
+        error: 'Token do Google inválido'
       });
     }
+
+    const googleId = payload.sub;
+    const email = payload.email;
+    const name = payload.name;
+    const avatar = payload.picture;
 
     // Buscar ou criar perfil do usuário
     let userProfile = null;
     try {
-      // Tentar buscar perfil existente
+      // Tentar buscar perfil existente pelo Google ID
       const { data: existingProfile, error: profileError } = await supabase
         .from('user_profiles')
         .select('*')
-        .eq('id', data.user.id)
+        .eq('google_id', googleId)
         .single();
 
       if (existingProfile) {
@@ -203,19 +204,21 @@ router.post('/login/google', async (req, res, next) => {
         await supabase
           .from('user_profiles')
           .update({ last_login: new Date().toISOString() })
-          .eq('id', data.user.id);
+          .eq('google_id', googleId);
         
         userProfile = existingProfile;
       } else {
-        // Criar novo perfil (o trigger já deve ter criado, mas garantimos aqui)
+        // Criar novo perfil
+        const userId = `google_${googleId}`;
         const { data: newProfile, error: createError } = await supabase
           .from('user_profiles')
           .insert({
-            id: data.user.id,
-            full_name: data.user.user_metadata?.name || data.user.user_metadata?.full_name || data.user.email,
-            avatar_url: data.user.user_metadata?.avatar_url,
+            id: userId,
+            email: email,
+            full_name: name,
+            avatar_url: avatar,
             provider: 'google',
-            google_id: data.user.user_metadata?.sub,
+            google_id: googleId,
             email_verified: true,
             last_login: new Date().toISOString()
           })
@@ -227,10 +230,12 @@ router.post('/login/google', async (req, res, next) => {
         }
         
         userProfile = newProfile || { 
-          id: data.user.id,
-          full_name: data.user.user_metadata?.name || data.user.user_metadata?.full_name || data.user.email,
-          avatar_url: data.user.user_metadata?.avatar_url,
-          provider: 'google'
+          id: userId,
+          email: email,
+          full_name: name,
+          avatar_url: avatar,
+          provider: 'google',
+          google_id: googleId
         };
       }
     } catch (profileErr) {
@@ -241,10 +246,10 @@ router.post('/login/google', async (req, res, next) => {
     res.json({
       success: true,
       user: {
-        id: data.user.id,
-        email: data.user.email,
-        name: userProfile?.full_name || data.user.user_metadata?.name || data.user.user_metadata?.full_name,
-        avatar: userProfile?.avatar_url || data.user.user_metadata?.avatar_url,
+        id: userProfile?.id || `google_${googleId}`,
+        email: email,
+        name: userProfile?.full_name || name,
+        avatar: userProfile?.avatar_url || avatar,
         provider: 'google',
         cpf: userProfile?.cpf,
         phone: userProfile?.phone,
