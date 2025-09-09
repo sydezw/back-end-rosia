@@ -34,7 +34,11 @@
         },
         {
           "key": "Cross-Origin-Opener-Policy",
-          "value": "same-origin-allow-popups"
+          "value": "unsafe-none"
+        },
+        {
+          "key": "Cross-Origin-Resource-Policy",
+          "value": "cross-origin"
         },
         {
           "key": "Cross-Origin-Embedder-Policy",
