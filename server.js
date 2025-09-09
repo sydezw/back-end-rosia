@@ -15,6 +15,8 @@ const uploadRoutes = require('./routes/upload');
 const adminRoutes = require('./routes/admin');
 const paymentRoutes = require('./routes/payment');
 const profileRoutes = require('./routes/profile');
+const usersRoutes = require('./routes/users');
+const cepRoutes = require('./routes/cep');
 
 // Importar middlewares
 const errorHandler = require('./middleware/errorHandler');
@@ -83,19 +85,21 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // Middleware específico para webhook (após express.json para não interferir)
 app.use('/webhook', express.raw({ type: 'application/json' }));
 
-// Rotas com prefixo /api
+// Rotas da API
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/shipping', shippingRoutes);
 app.use('/api/webhook', webhookRoutes);
+app.use('/api/cep', cepRoutes);
 
-// Rotas protegidas (requerem autenticação)
+// Rotas protegidas
 app.use('/api/orders', authenticateUser, orderRoutes);
 app.use('/api/checkout', authenticateUser, checkoutRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/profile', profileRoutes);
+app.use('/api/users', usersRoutes);
 
 // Rotas sem prefixo /api (para compatibilidade)
 app.use('/auth', authRoutes);
