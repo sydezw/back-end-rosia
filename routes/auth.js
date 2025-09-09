@@ -1,6 +1,16 @@
 const express = require('express');
+const jwt = require('jsonwebtoken');
 const { supabase, supabaseAdmin } = require('../config/supabase');
-const { authenticateUser } = require('../middleware/auth');
+const { authenticateUser, authenticateToken } = require('../middleware/auth');
+const { hashPassword, comparePassword } = require('../utils/password');
+const { verifyGoogleToken } = require('../utils/google-auth');
+const { 
+  createUser, 
+  createGoogleUser, 
+  findUserByEmail, 
+  findUserByGoogleId, 
+  updateLastLogin 
+} = require('../db/user-queries');
 const router = express.Router();
 
 /**
@@ -576,6 +586,267 @@ router.post('/reset-password', async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+/**
+ * POST /auth/register-jwt
+ * Registro de usuário com JWT personalizado
+ */
+router.post('/register-jwt', async (req, res, next) => {
+  try {
+    const { name, email, password, cpf, phone, birth_date } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Nome, email e senha são obrigatórios',
+        error_code: 'MISSING_FIELDS'
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Senha deve ter pelo menos 6 caracteres',
+        error_code: 'WEAK_PASSWORD'
+      });
+    }
+
+    // Verificar se email já existe
+    const existingUser = await findUserByEmail(email);
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: 'Email já está em uso',
+        error_code: 'EMAIL_EXISTS'
+      });
+    }
+
+    // Hash da senha para armazenar no perfil
+    const password_hash = await hashPassword(password);
+
+    // Criar usuário (Supabase Auth + perfil)
+    const user = await createUser({
+      name,
+      email,
+      password, // Senha original para Supabase Auth
+      password_hash, // Hash para o perfil
+      cpf,
+      phone,
+      birth_date
+    });
+
+    // Gerar JWT
+    const token = jwt.sign(
+      { userId: user.id, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'Usuário criado com sucesso',
+      user: {
+        id: user.id,
+        name: user.nome,
+        email: user.email,
+        auth_provider: user.auth_provider,
+        email_verified: user.email_verified
+      },
+      token
+    });
+
+  } catch (error) {
+    console.error('Erro no registro:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erro interno do servidor',
+      error_code: 'INTERNAL_ERROR'
+    });
+  }
+});
+
+/**
+ * POST /auth/login-jwt
+ * Login com email e senha usando JWT personalizado
+ */
+router.post('/login-jwt', async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email e senha são obrigatórios',
+        error_code: 'MISSING_FIELDS'
+      });
+    }
+
+    // Buscar usuário
+    const user = await findUserByEmail(email);
+    if (!user || user.auth_provider !== 'email') {
+      return res.status(401).json({
+        success: false,
+        message: 'Credenciais inválidas',
+        error_code: 'INVALID_CREDENTIALS'
+      });
+    }
+
+    // Verificar senha
+    const isValidPassword = await comparePassword(password, user.password_hash);
+    if (!isValidPassword) {
+      return res.status(401).json({
+        success: false,
+        message: 'Credenciais inválidas',
+        error_code: 'INVALID_CREDENTIALS'
+      });
+    }
+
+    // Atualizar último login
+    await updateLastLogin(user.id);
+
+    // Gerar JWT
+    const token = jwt.sign(
+      { userId: user.id, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+    );
+
+    res.json({
+      success: true,
+      message: 'Login realizado com sucesso',
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        cpf: user.cpf,
+        phone: user.phone,
+        birth_date: user.birth_date,
+        auth_provider: user.auth_provider,
+        last_login: new Date().toISOString()
+      },
+      token
+    });
+
+  } catch (error) {
+    console.error('Erro no login:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erro interno do servidor',
+      error_code: 'INTERNAL_ERROR'
+    });
+  }
+});
+
+/**
+ * POST /auth/login/google-jwt
+ * Login com Google usando JWT personalizado
+ */
+router.post('/login/google-jwt', async (req, res, next) => {
+  try {
+    const { google_token, google_user } = req.body;
+
+    if (!google_token || !google_user) {
+      return res.status(400).json({
+        success: false,
+        message: 'Token do Google e dados do usuário são obrigatórios',
+        error_code: 'MISSING_FIELDS'
+      });
+    }
+
+    // Verificar token do Google
+    let googlePayload;
+    try {
+      googlePayload = await verifyGoogleToken(google_token);
+    } catch (error) {
+      return res.status(401).json({
+        success: false,
+        message: 'Token do Google inválido',
+        error_code: 'INVALID_GOOGLE_TOKEN'
+      });
+    }
+
+    // Buscar usuário existente
+    let user = await findUserByGoogleId(google_user.id);
+    
+    if (!user) {
+      // Verificar se já existe usuário com mesmo email
+      const existingUser = await findUserByEmail(google_user.email);
+      if (existingUser) {
+        return res.status(409).json({
+          success: false,
+          message: 'Email já está em uso com outro método de autenticação',
+          error_code: 'EMAIL_EXISTS'
+        });
+      }
+
+      // Criar novo usuário
+      user = await createGoogleUser({
+        name: google_user.name,
+        email: google_user.email,
+        google_id: google_user.id
+      });
+    }
+
+    // Atualizar último login
+    await updateLastLogin(user.id);
+
+    // Gerar JWT
+    const token = jwt.sign(
+      { userId: user.id, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+    );
+
+    res.json({
+      success: true,
+      message: 'Login com Google realizado com sucesso',
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        google_id: user.google_id,
+        auth_provider: user.auth_provider,
+        email_verified: user.email_verified,
+        last_login: new Date().toISOString()
+      },
+      token
+    });
+
+  } catch (error) {
+    console.error('Erro no login com Google:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erro interno do servidor',
+      error_code: 'INTERNAL_ERROR'
+    });
+  }
+});
+
+/**
+ * GET /auth/verify
+ * Verificar token JWT
+ */
+router.get('/verify', authenticateToken, async (req, res) => {
+  res.json({
+    success: true,
+    user: {
+      id: req.user.id,
+      name: req.user.name,
+      email: req.user.email
+    }
+  });
+});
+
+/**
+ * POST /auth/logout-jwt
+ * Logout (JWT é stateless, apenas confirma)
+ */
+router.post('/logout-jwt', authenticateToken, async (req, res) => {
+  res.json({
+    success: true,
+    message: 'Logout realizado com sucesso'
+  });
 });
 
 module.exports = router;

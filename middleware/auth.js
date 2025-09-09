@@ -1,7 +1,48 @@
 const { supabase } = require('../config/supabase');
+const jwt = require('jsonwebtoken');
+const { findUserById } = require('../db/user-queries');
 
 /**
- * Middleware para autenticar usuário usando JWT do Supabase
+ * Middleware para autenticar usuário usando JWT personalizado
+ */
+const authenticateToken = async (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ 
+      success: false, 
+      message: 'Token não fornecido',
+      code: 'MISSING_TOKEN'
+    });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await findUserById(decoded.userId);
+    
+    if (!user) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Usuário não encontrado',
+        code: 'USER_NOT_FOUND'
+      });
+    }
+
+    req.user = user;
+    req.userId = user.id;
+    next();
+  } catch (error) {
+    return res.status(403).json({ 
+      success: false, 
+      message: 'Token inválido',
+      code: 'INVALID_TOKEN'
+    });
+  }
+};
+
+/**
+ * Middleware para autenticar usuário usando JWT do Supabase (mantido para compatibilidade)
  */
 const authenticateUser = async (req, res, next) => {
   try {
@@ -192,6 +233,7 @@ const checkAdminStatus = async (req, res, next) => {
 };
 
 module.exports = {
+  authenticateToken,
   authenticateUser,
   optionalAuth,
   authenticateAdmin,
