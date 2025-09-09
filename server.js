@@ -42,20 +42,36 @@ app.use(requestLogger);
 // Servir arquivos estáticos
 app.use(express.static('public'));
 
+// Headers de segurança para resolver Cross-Origin-Opener-Policy
+app.use((req, res, next) => {
+  res.header('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  res.header('Cross-Origin-Embedder-Policy', 'unsafe-none');
+  next();
+});
+
 app.use(cors({
   origin: [
     process.env.FRONTEND_URL,
     process.env.FRONTEND_URL_LOCAL, 
-    'http://localhost:3000', 
+    'http://localhost:3000',
+    'http://localhost:5173', // Vite dev server
     'https://www.rosia.com.br',
+    'https://back-end-rosia02.vercel.app', // Backend na Vercel
+    'https://nsazbeovtmmetpiyokqc.supabase.co', // Supabase para OAuth
     'http://192.168.0.13:8080',
     'http://127.0.0.1:8080'
   ].filter(Boolean),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization', 
+    'X-Requested-With',
+    'Accept',
+    'Origin'
+  ],
   optionsSuccessStatus: 200
-}));
+}));}]}}
 
 // Middlewares de parsing (devem vir antes das rotas)
 app.use(express.json({ limit: '50mb' }));
