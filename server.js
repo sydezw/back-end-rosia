@@ -73,7 +73,7 @@ app.use(cors({
     'Origin'
   ],
   optionsSuccessStatus: 200
-}));}]}}
+}));
 
 // Middlewares de parsing (devem vir antes das rotas)
 app.use(express.json({ limit: '50mb' }));
