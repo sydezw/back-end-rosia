@@ -46,8 +46,9 @@ app.use(express.static('public'));
 
 // Headers de segurança para resolver Cross-Origin-Opener-Policy
 app.use((req, res, next) => {
-  res.header('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  res.header('Cross-Origin-Opener-Policy', 'unsafe-none');
   res.header('Cross-Origin-Embedder-Policy', 'unsafe-none');
+  res.header('Cross-Origin-Resource-Policy', 'cross-origin');
   next();
 });
 
@@ -64,7 +65,11 @@ app.use(cors({
     'https://back-end-rosia02.vercel.app', // Backend na Vercel
     'https://nsazbeovtmmetpiyokqc.supabase.co', // Supabase para OAuth
     'http://192.168.0.13:8080',
-    'http://127.0.0.1:8080'
+    'http://127.0.0.1:8080',
+    // Domínios do Google para OAuth
+    'https://accounts.google.com',
+    'https://www.googleapis.com',
+    'https://oauth2.googleapis.com'
   ].filter(Boolean),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
