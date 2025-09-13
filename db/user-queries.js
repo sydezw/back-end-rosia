@@ -8,10 +8,14 @@ const crypto = require('crypto');
  * @returns {Promise<Object>} Usuário criado
  */
 const createUser = async (userData) => {
-  // Criar o perfil diretamente na tabela user_profiles sem user_id
+  // Gerar um UUID para usar como user_id
+  const uuid = crypto.randomUUID();
+  
+  // Criar o perfil diretamente na tabela user_profiles
   const { data, error } = await supabaseAdmin
     .from('user_profiles')
     .insert({
+      user_id: uuid,
       nome: userData.name,
       email: userData.email,
       password_hash: userData.password_hash,

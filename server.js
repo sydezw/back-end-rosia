@@ -46,7 +46,7 @@ app.use(express.static('public'));
 
 // Headers de segurança para resolver Cross-Origin-Opener-Policy
 app.use((req, res, next) => {
-  res.header('Cross-Origin-Opener-Policy', 'unsafe-none');
+  res.header('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   res.header('Cross-Origin-Embedder-Policy', 'unsafe-none');
   res.header('Cross-Origin-Resource-Policy', 'cross-origin');
   next();
