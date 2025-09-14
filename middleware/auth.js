@@ -2,13 +2,14 @@ const { supabase } = require('../config/supabase');
 const jwt = require('jsonwebtoken');
 const { findUserById } = require('../db/user-queries');
 const { checkIfTokenInvalidated } = require('../utils/tokenManager');
+const { validateJWTToken, sanitizeToken, getTokenDebugInfo } = require('../utils/token-validation');
 
 /**
- * Middleware para autenticar usuário usando JWT personalizado
+ * Middleware para autenticar usuário usando JWT personalizado com validação robusta
  */
 const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  let token = authHeader && authHeader.split(' ')[1];
 
   // Log para debug
   console.log('🔐 Auth Debug - Headers:', {
@@ -19,7 +20,8 @@ const authenticateToken = async (req, res, next) => {
   console.log('🔐 Auth Debug - Token:', {
     provided: !!token,
     length: token?.length,
-    preview: token ? `${token.substring(0, 20)}...` : 'N/A'
+    preview: token ? `${token.substring(0, 20)}...` : 'N/A',
+    isUndefined: token === 'undefined'
   });
 
   if (!token) {
@@ -27,7 +29,48 @@ const authenticateToken = async (req, res, next) => {
     return res.status(401).json({ 
       success: false, 
       message: 'Token de acesso requerido',
-      code: 'MISSING_TOKEN'
+      code: 'MISSING_TOKEN',
+      debug: {
+        authHeader: !!authHeader,
+        headerFormat: authHeader ? 'Bearer token expected' : 'Authorization header missing'
+      }
+    });
+  }
+
+  // Sanitizar token para evitar valores 'undefined' ou inválidos
+  const sanitizedToken = sanitizeToken(token);
+  if (!sanitizedToken) {
+    console.error('❌ Token inválido após sanitização:', {
+      originalToken: token.substring(0, 20) + '...',
+      tokenLength: token.length,
+      isUndefined: token === 'undefined',
+      isEmpty: token === ''
+    });
+    
+    return res.status(401).json({
+      success: false,
+      message: 'Token fornecido é inválido',
+      code: 'INVALID_TOKEN_FORMAT',
+      debug: {
+        tokenLength: token.length,
+        isUndefined: token === 'undefined',
+        isEmpty: token === '',
+        suggestion: 'Verifique se o token não é "undefined" antes de enviar'
+      }
+    });
+  }
+  
+  token = sanitizedToken;
+
+  // Validação completa do token JWT
+  const tokenValidation = validateJWTToken(token);
+  if (!tokenValidation.isValid) {
+    console.error('❌ Token JWT com formato inválido:', tokenValidation);
+    return res.status(401).json({
+      success: false,
+      message: 'Token JWT com formato inválido',
+      code: 'MALFORMED_JWT',
+      debug: tokenValidation.debug
     });
   }
 
@@ -46,7 +89,18 @@ const authenticateToken = async (req, res, next) => {
     }
     
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log('✅ Token JWT válido:', { userId: decoded.userId, email: decoded.email });
+    
+    // Validar campos obrigatórios no payload
+    if (!decoded.userId || !decoded.email) {
+      throw new Error('Token não contém informações de usuário válidas');
+    }
+    
+    console.log('✅ Token JWT válido:', { 
+      userId: decoded.userId, 
+      email: decoded.email,
+      exp: decoded.exp ? new Date(decoded.exp * 1000).toISOString() : 'não definido',
+      iat: decoded.iat ? new Date(decoded.iat * 1000).toISOString() : 'não definido'
+    });
     
     const user = await findUserById(decoded.userId);
     
@@ -55,13 +109,25 @@ const authenticateToken = async (req, res, next) => {
       return res.status(401).json({ 
         success: false, 
         message: 'Usuário não encontrado',
-        code: 'USER_NOT_FOUND'
+        code: 'USER_NOT_FOUND',
+        debug: {
+          userId: decoded.userId,
+          suggestion: 'Usuário pode ter sido removido do sistema'
+        }
       });
     }
 
     console.log('✅ Usuário autenticado:', { id: user.id, email: user.email });
     req.user = user;
     req.userId = user.id;
+    req.token = token;
+    req.tokenPayload = decoded;
+    req.authDebug = {
+      tokenValidation,
+      sanitized: true,
+      middleware: 'authenticateToken',
+      timestamp: new Date().toISOString()
+    };
     next();
   } catch (error) {
     console.log('❌ Erro na validação do token:', {
@@ -69,10 +135,21 @@ const authenticateToken = async (req, res, next) => {
       message: error.message,
       stack: error.stack?.split('\n')[0]
     });
+    
+    // Gerar informações de debug detalhadas
+    const debugInfo = getTokenDebugInfo(token);
+    
     return res.status(403).json({ 
       success: false, 
       message: 'Token inválido ou expirado',
-      code: 'INVALID_TOKEN'
+      code: error.name === 'TokenExpiredError' ? 'TOKEN_EXPIRED' : 'INVALID_TOKEN',
+      debug: {
+        ...debugInfo,
+        jwtError: error.name,
+        suggestion: error.name === 'TokenExpiredError' 
+          ? 'Token expirado, faça login novamente'
+          : 'Token inválido, limpe o localStorage e faça login novamente'
+      }
     });
   }
 };

@@ -167,33 +167,92 @@ router.post('/register', async (req, res, next) => {
  * Login com Google OAuth
  */
 router.post('/login/google', async (req, res, next) => {
+  console.log('🚀 POST /login/google - Iniciando login com Google');
+  
   try {
     const { token } = req.body;
+    const { sanitizeToken } = require('../utils/token-validation');
+    
+    console.log('🔍 Dados recebidos:', {
+      hasToken: !!token,
+      tokenLength: token ? token.length : 0,
+      requestHeaders: req.headers['user-agent'] ? 'Present' : 'Missing'
+    });
 
+    // Validação de entrada
     if (!token) {
+      console.error('❌ Token do Google não fornecido');
       return res.status(400).json({
-        error: 'Token do Google é obrigatório'
+        error: 'Token do Google é obrigatório',
+        code: 'MISSING_TOKEN'
       });
     }
 
+    if (typeof token !== 'string' || token.trim().length === 0) {
+      console.error('❌ Token do Google inválido (formato)');
+      return res.status(400).json({
+        error: 'Token do Google deve ser uma string válida',
+        code: 'INVALID_TOKEN_FORMAT'
+      });
+    }
+
+    console.log('🔍 Verificando token do Google...');
+    
     // Verificar token do Google
-    const payload = await verifyGoogleToken(token);
+    let payload;
+    try {
+      payload = await verifyGoogleToken(token.trim());
+    } catch (tokenError) {
+      console.error('❌ Erro na verificação do token:', tokenError.message);
+      return res.status(401).json({
+        error: tokenError.message,
+        code: 'INVALID_GOOGLE_TOKEN'
+      });
+    }
     
     if (!payload) {
+      console.error('❌ Payload do token Google vazio');
       return res.status(401).json({
-        error: 'Token do Google inválido'
+        error: 'Token do Google inválido - payload vazio',
+        code: 'EMPTY_PAYLOAD'
       });
     }
 
+    // Validar dados essenciais do payload
     const googleId = payload.sub;
     const email = payload.email;
     const name = payload.name;
     const avatar = payload.picture;
+    const emailVerified = payload.email_verified;
+
+    console.log('✅ Token Google válido:', {
+      googleId: googleId ? 'Present' : 'Missing',
+      email: email || 'Missing',
+      name: name || 'Missing',
+      emailVerified: emailVerified
+    });
+
+    if (!googleId || !email) {
+      console.error('❌ Dados essenciais ausentes no token Google');
+      return res.status(400).json({
+        error: 'Token do Google não contém dados essenciais (ID ou email)',
+        code: 'INCOMPLETE_GOOGLE_DATA'
+      });
+    }
+
+    if (!emailVerified) {
+      console.warn('⚠️ Email não verificado no Google:', email);
+    }
+
+    console.log('🔍 Buscando/criando perfil do usuário...');
 
     // Buscar ou criar perfil do usuário
     let userProfile = null;
+    const userId = `google_${googleId}`;
+    
     try {
       // Tentar buscar perfil existente pelo Google ID
+      console.log('🔍 Buscando perfil existente por Google ID:', googleId);
       const { data: existingProfile, error: profileError } = await supabase
         .from('user_profiles')
         .select('*')
@@ -201,77 +260,187 @@ router.post('/login/google', async (req, res, next) => {
         .single();
 
       if (existingProfile) {
+        console.log('✅ Perfil existente encontrado:', existingProfile.id);
+        
         // Atualizar último login
-        await supabase
+        const { error: updateError } = await supabase
           .from('user_profiles')
-          .update({ last_login: new Date().toISOString() })
+          .update({ 
+            last_login: new Date().toISOString(),
+            avatar_url: avatar // Atualizar avatar caso tenha mudado
+          })
           .eq('google_id', googleId);
+        
+        if (updateError) {
+          console.warn('⚠️ Erro ao atualizar último login:', updateError.message);
+        } else {
+          console.log('✅ Último login atualizado');
+        }
         
         userProfile = existingProfile;
       } else {
+        console.log('🔍 Perfil não encontrado, criando novo perfil...');
+        
         // Criar novo perfil
-        const userId = `google_${googleId}`;
+        const newProfileData = {
+          id: userId,
+          email: email,
+          full_name: name || 'Usuário Google',
+          avatar_url: avatar,
+          provider: 'google',
+          google_id: googleId,
+          email_verified: emailVerified || false,
+          last_login: new Date().toISOString()
+        };
+        
+        console.log('🔍 Dados do novo perfil:', newProfileData);
+        
         const { data: newProfile, error: createError } = await supabase
           .from('user_profiles')
-          .insert({
-            id: userId,
-            email: email,
-            full_name: name,
-            avatar_url: avatar,
-            provider: 'google',
-            google_id: googleId,
-            email_verified: true,
-            last_login: new Date().toISOString()
-          })
+          .insert(newProfileData)
           .select()
           .single();
 
-        if (createError && createError.code !== '23505') { // Ignora erro de duplicata
-          console.error('Erro ao criar perfil:', createError);
+        if (createError) {
+          if (createError.code === '23505') {
+            console.warn('⚠️ Perfil já existe (duplicata), tentando buscar novamente...');
+            // Tentar buscar novamente
+            const { data: retryProfile } = await supabase
+              .from('user_profiles')
+              .select('*')
+              .eq('google_id', googleId)
+              .single();
+            userProfile = retryProfile;
+          } else {
+            console.error('❌ Erro ao criar perfil:', createError);
+            throw createError;
+          }
+        } else {
+          console.log('✅ Novo perfil criado:', newProfile.id);
+          userProfile = newProfile;
         }
         
-        userProfile = newProfile || { 
-          id: userId,
-          email: email,
-          full_name: name,
-          avatar_url: avatar,
-          provider: 'google',
-          google_id: googleId
-        };
+        // Fallback se ainda não temos perfil
+        if (!userProfile) {
+          console.log('🔧 Usando dados de fallback para o perfil');
+          userProfile = newProfileData;
+        }
       }
     } catch (profileErr) {
-      console.error('Erro ao gerenciar perfil do usuário:', profileErr);
-      // Continua mesmo se houver erro no perfil
+      console.error('❌ Erro crítico ao gerenciar perfil do usuário:', profileErr);
+      return res.status(500).json({
+        error: 'Erro interno ao processar perfil do usuário',
+        code: 'PROFILE_ERROR'
+      });
     }
 
-    // Gerar JWT token para sessão
-    const jwtToken = jwt.sign(
-      {
-        userId: userProfile?.id || userId,
-        email: email,
-        provider: 'google'
-      },
-      process.env.JWT_SECRET || 'fallback-secret',
-      { expiresIn: '7d' }
-    );
+    // Validar JWT_SECRET
+    if (!process.env.JWT_SECRET) {
+      console.error('❌ JWT_SECRET não configurado');
+      return res.status(500).json({
+        error: 'Configuração do servidor incompleta',
+        code: 'MISSING_JWT_SECRET'
+      });
+    }
 
-    res.json({
+    console.log('🔍 Gerando JWT token...');
+    
+    // Gerar JWT token para sessão com validação robusta
+    let jwtToken;
+    try {
+      const jwtPayload = {
+        userId: userProfile.id,
+        email: email,
+        provider: 'google',
+        googleId: googleId,
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60) // 7 dias
+      };
+      
+      jwtToken = jwt.sign(jwtPayload, process.env.JWT_SECRET, {
+        expiresIn: '7d',
+        issuer: 'rosia-backend',
+        audience: 'rosia-frontend'
+      });
+      
+      // Validar token gerado para evitar problemas
+      const sanitizedToken = sanitizeToken(jwtToken);
+      if (!sanitizedToken) {
+        throw new Error('Token gerado é inválido');
+      }
+      
+      console.log('✅ Token JWT gerado e validado:', {
+        tokenLength: jwtToken.length,
+        hasValidFormat: !!sanitizedToken,
+        expiresAt: new Date(jwtPayload.exp * 1000).toISOString()
+      });
+      
+    } catch (error) {
+      console.error('❌ Erro ao gerar token JWT:', error);
+      return res.status(500).json({
+        error: 'Erro ao gerar token de autenticação',
+        details: error.message,
+        code: 'JWT_GENERATION_ERROR'
+      });
+    }
+
+    const responseData = {
       success: true,
       user: {
-        id: userProfile?.id || userId,
+        id: userProfile.id,
         email: email,
-        name: userProfile?.full_name || name,
-        avatar: userProfile?.avatar_url || avatar,
+        name: userProfile.full_name || name,
+        avatar: userProfile.avatar_url || avatar,
         provider: 'google',
-        cpf: userProfile?.cpf,
-        phone: userProfile?.phone,
-        hasProfile: !!userProfile
+        cpf: userProfile.cpf || null,
+        phone: userProfile.phone || null,
+        hasProfile: true,
+        emailVerified: emailVerified
       },
-      token: jwtToken
+      token: jwtToken,
+      // Instruções para o frontend evitar salvar "undefined"
+      frontend_instructions: {
+        validation: {
+          check_token_before_save: 'Sempre verificar se token não é "undefined" antes de salvar',
+          sanitize_tokens: 'Usar função de sanitização para validar tokens',
+          clear_on_invalid: 'Limpar localStorage se tokens forem inválidos'
+        },
+        example_code: {
+          save_token: 'if (data.token && data.token !== "undefined") { localStorage.setItem("access_token", data.token); }',
+          validate_before_use: 'const token = localStorage.getItem("access_token"); if (!token || token === "undefined") { /* redirect to login */ }'
+        }
+      }
+    };
+
+    console.log('✅ Login Google realizado com sucesso:', {
+      userId: userProfile.id,
+      email: email,
+      hasToken: !!jwtToken,
+      tokenValid: jwtToken !== 'undefined'
     });
 
+    // Log final para debug
+    console.log('📤 Resposta enviada:', {
+      success: responseData.success,
+      hasUser: !!responseData.user,
+      hasToken: !!responseData.token,
+      tokenValid: responseData.token !== 'undefined'
+    });
+
+    res.json(responseData);
+
   } catch (error) {
-    next(error);
+    console.error('❌ Erro não tratado no login Google:', error);
+    console.error('❌ Stack trace:', error.stack);
+    
+    // Não expor detalhes internos em produção
+    const isDevelopment = process.env.NODE_ENV !== 'production';
+    
+    res.status(500).json({
+      error: 'Erro interno do servidor durante login Google',
+      code: 'INTERNAL_ERROR',
+      ...(isDevelopment && { details: error.message })
+    });
   }
 });
 
@@ -885,6 +1054,573 @@ router.post('/logout-jwt', authenticateToken, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Erro interno no logout'
+    });
+  }
+});
+
+/**
+ * GET /auth/debug/google-config
+ * Debug: Verificar configuração do Google OAuth
+ */
+router.get('/debug/google-config', async (req, res) => {
+  console.log('🔍 GET /debug/google-config - Verificando configuração Google OAuth');
+  
+  try {
+    const { 
+      getGoogleAuthDebugInfo, 
+      getFallbackConfig, 
+      validateEnvironmentConfig 
+    } = require('../utils/google-auth');
+    
+    const debugInfo = getGoogleAuthDebugInfo();
+    const fallbackConfig = getFallbackConfig();
+    const validation = validateEnvironmentConfig();
+    
+    const configStatus = {
+      timestamp: new Date().toISOString(),
+      validation: {
+        isValid: validation.isValid,
+        errors: validation.errors,
+        warnings: validation.warnings,
+        suggestions: validation.suggestions
+      },
+      environment: validation.environment,
+      googleAuth: {
+        hasClientId: debugInfo.hasClientId,
+        clientIdPrefix: debugInfo.clientIdPrefix,
+        hasClientSecret: debugInfo.hasClientSecret,
+        fallbackClientIds: fallbackConfig.googleClientIds
+      },
+      jwt: {
+        hasSecret: !!process.env.JWT_SECRET,
+        secretPrefix: process.env.JWT_SECRET ? process.env.JWT_SECRET.substring(0, 10) + '...' : 'Não configurado'
+      },
+      supabase: {
+        hasUrl: !!process.env.SUPABASE_URL,
+        hasAnonKey: !!process.env.SUPABASE_ANON_KEY,
+        hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY
+      },
+      server: {
+        port: process.env.PORT || 'Não definida',
+        cors: {
+          origin: process.env.CORS_ORIGIN || 'Não definida',
+          allowedOrigins: fallbackConfig.allowedOrigins
+        }
+      },
+      recommendations: fallbackConfig.recommendations
+    };
+    
+    console.log('✅ Configuração Google OAuth verificada:', {
+      isValid: validation.isValid,
+      errors: validation.errors.length,
+      warnings: validation.warnings.length
+    });
+    
+    res.json({
+      success: true,
+      message: 'Configuração do Google OAuth com validação de ambiente',
+      data: configStatus
+    });
+    
+  } catch (error) {
+    console.error('❌ Erro ao verificar configuração:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao verificar configuração',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * POST /auth/debug/google-token
+ * Debug: Testar validação de token Google
+ */
+router.post('/debug/google-token', async (req, res) => {
+  console.log('🔍 POST /debug/google-token - Testando validação de token Google');
+  
+  try {
+    const { token } = req.body;
+    
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        error: 'Token é obrigatório para teste',
+        example: {
+          token: 'eyJhbGciOiJSUzI1NiIsImtpZCI6...'
+        }
+      });
+    }
+    
+    console.log('🔍 Testando token:', {
+      hasToken: !!token,
+      tokenLength: token.length,
+      tokenPrefix: token.substring(0, 50) + '...'
+    });
+    
+    // Testar verificação do token
+    let payload;
+    let tokenValid = false;
+    let errorDetails = null;
+    
+    try {
+      payload = await verifyGoogleToken(token);
+      tokenValid = true;
+      console.log('✅ Token válido');
+    } catch (tokenError) {
+      errorDetails = {
+        message: tokenError.message,
+        type: tokenError.constructor.name
+      };
+      console.log('❌ Token inválido:', tokenError.message);
+    }
+    
+    const testResult = {
+      timestamp: new Date().toISOString(),
+      tokenTest: {
+        valid: tokenValid,
+        error: errorDetails,
+        payload: tokenValid ? {
+          sub: payload.sub,
+          email: payload.email,
+          name: payload.name,
+          picture: payload.picture ? 'Present' : 'Missing',
+          email_verified: payload.email_verified,
+          iss: payload.iss,
+          aud: payload.aud,
+          exp: payload.exp,
+          iat: payload.iat
+        } : null
+      },
+      recommendations: []
+    };
+    
+    // Adicionar recomendações baseadas no resultado
+    if (!tokenValid) {
+      testResult.recommendations.push('Verifique se o token foi gerado corretamente pelo Google');
+      testResult.recommendations.push('Confirme se o GOOGLE_CLIENT_ID está configurado corretamente');
+      testResult.recommendations.push('Verifique se o token não expirou');
+    } else {
+      testResult.recommendations.push('Token válido! Pode prosseguir com o login');
+      if (!payload.email_verified) {
+        testResult.recommendations.push('Atenção: Email não verificado no Google');
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: 'Teste de token Google concluído',
+      data: testResult
+    });
+    
+  } catch (error) {
+    console.error('❌ Erro no teste de token:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro interno no teste de token',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * GET /auth/debug/google-flow
+ * Debug: Informações sobre o fluxo completo do Google OAuth
+ */
+router.get('/debug/google-flow', async (req, res) => {
+  console.log('🔍 GET /debug/google-flow - Informações do fluxo Google OAuth');
+  
+  try {
+    const flowInfo = {
+      timestamp: new Date().toISOString(),
+      endpoints: {
+        config: {
+          method: 'GET',
+          url: '/api/auth/debug/google-config',
+          description: 'Verificar configuração do Google OAuth'
+        },
+        tokenTest: {
+          method: 'POST',
+          url: '/api/auth/debug/google-token',
+          description: 'Testar validação de token Google',
+          body: { token: 'seu_google_token_aqui' }
+        },
+        jwtValidation: {
+          method: 'POST',
+          url: '/api/auth/debug/jwt-validation',
+          description: 'Testar validação de token JWT',
+          body: { token: 'seu_jwt_token_aqui' }
+        },
+        login: {
+          method: 'POST',
+          path: '/api/auth/login/google',
+          description: 'Login principal com token Google',
+          requiredFields: ['token'],
+          response: 'JWT token + dados do usuário'
+        },
+        loginJwt: {
+          method: 'POST',
+          path: '/api/auth/login/google-jwt',
+          description: 'Login alternativo com dados do Google',
+          requiredFields: ['google_token', 'google_user'],
+          response: 'JWT token + dados do usuário'
+        },
+        callback: {
+          method: 'GET',
+          path: '/api/auth/callback/google',
+          description: 'Callback para OAuth flow (se usado)',
+          parameters: ['code', 'state'],
+          response: 'Redirecionamento ou dados'
+        },
+        verify: {
+          method: 'GET',
+          url: '/api/auth/verify',
+          description: 'Verificar token JWT',
+          headers: { Authorization: 'Bearer jwt_token' }
+        }
+      },
+      configuration: {
+        required: [
+          'GOOGLE_CLIENT_ID',
+          'JWT_SECRET',
+          'SUPABASE_URL',
+          'SUPABASE_ANON_KEY'
+        ],
+        optional: [
+          'GOOGLE_CLIENT_SECRET',
+          'CORS_ORIGIN',
+          'NODE_ENV'
+        ]
+      },
+      troubleshooting: {
+        error403: {
+          description: 'Origem não permitida',
+          solutions: [
+            'Configurar domínios autorizados no Google Console',
+            'Adicionar URLs de desenvolvimento (localhost:3000, localhost:8080)',
+            'Verificar se o Client ID está correto'
+          ]
+        },
+        tokenInvalid: {
+          description: 'Token inválido ou expirado',
+          solutions: [
+            'Verificar se o token foi gerado corretamente',
+            'Confirmar se não expirou',
+            'Testar com endpoint /debug/google-token'
+          ]
+        },
+        undefinedToken: {
+          description: 'Token com valor "undefined" salvo no localStorage',
+          solutions: [
+            'Limpar localStorage: localStorage.clear()',
+            'Fazer novo login completo',
+            'Verificar função handleAuthSuccess no frontend'
+          ]
+        },
+        configError: {
+          description: 'Erro de configuração',
+          solutions: [
+            'Verificar variáveis de ambiente',
+            'Testar com endpoint /debug/google-config',
+            'Confirmar configuração no Google Console'
+          ]
+        }
+      },
+      testFlow: {
+        step1: 'Verificar configuração: GET /api/auth/debug/google-config',
+        step2: 'Obter token do Google no frontend',
+        step3: 'Testar token: POST /api/auth/debug/google-token',
+        step4: 'Fazer login: POST /api/auth/login/google',
+        step5: 'Verificar autenticação: GET /api/auth/verify',
+        step6: 'Testar JWT: POST /api/auth/debug/jwt-validation'
+      }
+    };
+    
+    res.json({
+      success: true,
+      message: 'Informações do fluxo Google OAuth',
+      data: flowInfo
+    });
+    
+  } catch (error) {
+    console.error('❌ Erro ao obter informações do fluxo:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao obter informações do fluxo',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * POST /auth/debug/jwt-validation
+ * Debug: Validar token JWT e detectar problemas como "undefined"
+ */
+router.post('/debug/jwt-validation', async (req, res) => {
+  console.log('🔍 POST /debug/jwt-validation - Validando token JWT');
+  
+  try {
+    const { token } = req.body;
+    const { getTokenDebugInfo, validateAndDecodeJWT, sanitizeToken } = require('../utils/token-validation');
+    
+    console.log('📥 Token recebido para validação:', {
+      exists: !!token,
+      type: typeof token,
+      length: token ? token.length : 0,
+      preview: token ? token.substring(0, 30) + '...' : 'null'
+    });
+    
+    // Obter informações detalhadas do token
+    const debugInfo = getTokenDebugInfo(token);
+    
+    // Tentar sanitizar o token
+    const sanitizedToken = sanitizeToken(token);
+    
+    // Se token foi sanitizado (removido), fornecer instruções
+    if (!sanitizedToken && token) {
+      debugInfo.sanitization = {
+        original: token,
+        sanitized: null,
+        action: 'Token removido por ser inválido',
+        recommendations: [
+          'Limpar localStorage: localStorage.clear()',
+          'Fazer novo login completo',
+          'Verificar função de salvamento de token no frontend'
+        ]
+      };
+    } else if (sanitizedToken) {
+      // Validar token sanitizado
+      const validation = validateAndDecodeJWT(sanitizedToken, process.env.JWT_SECRET);
+      debugInfo.validation = validation;
+      
+      if (validation.isValid) {
+        debugInfo.recommendations = [
+          'Token JWT válido e funcional',
+          'Pode ser usado para autenticação'
+        ];
+      } else {
+        debugInfo.recommendations = [
+          'Token possui formato correto mas falhou na validação',
+          'Verificar se JWT_SECRET está correto',
+          'Confirmar se token não expirou'
+        ];
+      }
+    }
+    
+    console.log('✅ Validação de JWT concluída:', {
+      isValid: debugInfo.validation?.isValid || false,
+      error: debugInfo.validation?.error || 'Token inválido'
+    });
+    
+    res.json({
+      success: true,
+      message: 'Validação de token JWT concluída',
+      data: debugInfo
+    });
+    
+  } catch (error) {
+    console.error('❌ Erro na validação de JWT:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro na validação de JWT',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * POST /auth/debug/cleanup-tokens
+ * Debug: Utilitário para limpar tokens corrompidos (simulação do frontend)
+ */
+router.post('/debug/cleanup-tokens', async (req, res) => {
+  console.log('🔍 POST /debug/cleanup-tokens - Simulando limpeza de tokens');
+  
+  try {
+    const { tokens } = req.body; // { access_token, refresh_token, user }
+    const { sanitizeToken } = require('../utils/token-validation');
+    
+    const cleanupResult = {
+      timestamp: new Date().toISOString(),
+      original: tokens || {},
+      cleaned: {},
+      actions: [],
+      recommendations: []
+    };
+    
+    if (tokens) {
+      // Verificar access_token
+      if (tokens.access_token) {
+        const cleanedAccessToken = sanitizeToken(tokens.access_token);
+        cleanupResult.cleaned.access_token = cleanedAccessToken;
+        
+        if (!cleanedAccessToken) {
+          cleanupResult.actions.push('access_token removido (inválido)');
+        } else {
+          cleanupResult.actions.push('access_token mantido (válido)');
+        }
+      }
+      
+      // Verificar refresh_token
+      if (tokens.refresh_token) {
+        const cleanedRefreshToken = sanitizeToken(tokens.refresh_token);
+        cleanupResult.cleaned.refresh_token = cleanedRefreshToken;
+        
+        if (!cleanedRefreshToken) {
+          cleanupResult.actions.push('refresh_token removido (inválido)');
+        } else {
+          cleanupResult.actions.push('refresh_token mantido (válido)');
+        }
+      }
+      
+      // Verificar user data
+      if (tokens.user) {
+        try {
+          const userData = typeof tokens.user === 'string' ? JSON.parse(tokens.user) : tokens.user;
+          if (userData && typeof userData === 'object') {
+            cleanupResult.cleaned.user = userData;
+            cleanupResult.actions.push('user data mantido (válido)');
+          } else {
+            cleanupResult.actions.push('user data removido (inválido)');
+          }
+        } catch (error) {
+          cleanupResult.actions.push('user data removido (JSON inválido)');
+        }
+      }
+    }
+    
+    // Gerar recomendações
+    if (cleanupResult.actions.some(action => action.includes('removido'))) {
+      cleanupResult.recommendations = [
+        'Execute no console do navegador: localStorage.clear()',
+        'Recarregue a página: window.location.reload()',
+        'Faça novo login completo',
+        'Verifique a função handleAuthSuccess no frontend'
+      ];
+    } else {
+      cleanupResult.recommendations = [
+        'Tokens parecem válidos',
+        'Se ainda há problemas, verifique a expiração',
+        'Teste com endpoint /debug/jwt-validation'
+      ];
+    }
+    
+    console.log('✅ Simulação de limpeza concluída:', {
+      actionsCount: cleanupResult.actions.length,
+      hasValidTokens: !!cleanupResult.cleaned.access_token
+    });
+    
+    res.json({
+      success: true,
+      message: 'Simulação de limpeza de tokens concluída',
+      data: cleanupResult
+    });
+    
+  } catch (error) {
+    console.error('❌ Erro na simulação de limpeza:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro na simulação de limpeza',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * GET /auth/debug/cleanup-tokens
+ * Limpa tokens corrompidos (simulação para frontend)
+ */
+router.get('/debug/cleanup-tokens', (req, res) => {
+  console.log('🧹 GET /debug/cleanup-tokens - Simulando limpeza de tokens');
+  
+  try {
+    // Simular limpeza de tokens corrompidos
+    const mockCleanupResult = {
+      cleaned: 3,
+      errors: 0,
+      keys: [
+        { key: 'access_token', reason: 'valor undefined', value: 'undefined' },
+        { key: 'refresh_token', reason: 'formato inválido', value: 'invalid_format' },
+        { key: 'user_data', reason: 'JSON corrompido', value: '{invalid_json' }
+      ],
+      timestamp: new Date().toISOString()
+    };
+    
+    res.json({
+      success: true,
+      message: 'Simulação de limpeza de tokens concluída',
+      cleanup: mockCleanupResult,
+      instructions: {
+        frontend: {
+          usage: 'Use LocalStorageCleanup.cleanupTokens() no console do browser',
+          auto_cleanup: 'LocalStorageCleanup.setupAutoCleanup(30) para limpeza automática',
+          manual_clear: 'LocalStorageCleanup.clearAllAuthData(true) para limpeza total'
+        },
+        validation: {
+          check_tokens: 'LocalStorageCleanup.validateCurrentTokens()',
+          is_valid_jwt: 'LocalStorageCleanup.isValidJWTFormat(token)'
+        }
+      },
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Erro na simulação de limpeza:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro na simulação de limpeza de tokens',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/**
+ * GET /auth/utils/localStorage-cleanup.js
+ * Serve o utilitário de limpeza de localStorage para o frontend
+ */
+router.get('/utils/localStorage-cleanup.js', (req, res) => {
+  console.log('📦 GET /utils/localStorage-cleanup.js - Servindo utilitário de limpeza');
+  
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    
+    const utilPath = path.join(__dirname, '..', 'utils', 'localStorage-cleanup.js');
+    
+    if (!fs.existsSync(utilPath)) {
+      return res.status(404).json({
+        success: false,
+        error: 'Utilitário de limpeza não encontrado',
+        code: 'CLEANUP_UTIL_NOT_FOUND'
+      });
+    }
+    
+    const utilContent = fs.readFileSync(utilPath, 'utf8');
+    
+    // Definir headers apropriados para JavaScript
+    res.setHeader('Content-Type', 'application/javascript');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    
+    // Adicionar comentário de cabeçalho
+    const header = `/**
+ * LocalStorage Cleanup Utility
+ * Servido pelo backend Rosia
+ * Timestamp: ${new Date().toISOString()}
+ * Endpoint: /auth/utils/localStorage-cleanup.js
+ */\n\n`;
+    
+    res.send(header + utilContent);
+    
+    console.log('✅ Utilitário de limpeza servido com sucesso');
+    
+  } catch (error) {
+    console.error('❌ Erro ao servir utilitário de limpeza:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao servir utilitário de limpeza',
+      details: error.message,
+      code: 'CLEANUP_UTIL_SERVE_ERROR'
     });
   }
 });
