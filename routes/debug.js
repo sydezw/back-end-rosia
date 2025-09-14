@@ -6,6 +6,147 @@ const { checkIfTokenInvalidated, getTokenStats } = require('../utils/tokenManage
 const router = express.Router();
 
 /**
+ * GET /debug/supabase
+ * Endpoint para testar conectividade com Supabase
+ */
+router.get('/supabase', async (req, res) => {
+  try {
+    console.log('🔍 Testando conectividade com Supabase...');
+    
+    const environmentCheck = {
+      SUPABASE_URL: !!process.env.SUPABASE_URL,
+      SUPABASE_ANON_KEY: !!process.env.SUPABASE_ANON_KEY,
+      SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      JWT_SECRET: !!process.env.JWT_SECRET,
+      NODE_ENV: process.env.NODE_ENV
+    };
+    
+    console.log('🔍 Environment Check:', environmentCheck);
+    
+    // Teste básico de conectividade
+    const { data, error } = await supabase
+      .from('user_profiles')
+      .select('count')
+      .limit(1);
+    
+    if (error) {
+      console.error('❌ Erro na consulta Supabase:', error);
+      return res.status(500).json({
+        success: false,
+        error: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+        environment: environmentCheck
+      });
+    }
+    
+    console.log('✅ Supabase conectado com sucesso');
+    
+    res.json({
+      success: true,
+      message: 'Supabase conectado com sucesso',
+      environment: environmentCheck,
+      queryResult: {
+        hasData: !!data,
+        dataLength: data?.length || 0
+      },
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Erro crítico no teste Supabase:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      code: 'SUPABASE_CONNECTION_ERROR',
+      stack: error.stack,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/**
+ * GET /debug/profile-test
+ * Endpoint para testar operações específicas da tabela user_profiles
+ */
+router.get('/profile-test', async (req, res) => {
+  try {
+    console.log('🔍 Testando operações na tabela user_profiles...');
+    
+    // Teste 1: Verificar se tabela existe
+    const { data: tableCheck, error: tableError } = await supabase
+      .from('user_profiles')
+      .select('id')
+      .limit(1);
+    
+    if (tableError) {
+      return res.status(500).json({
+        success: false,
+        test: 'table_exists',
+        error: tableError.message,
+        code: tableError.code
+      });
+    }
+    
+    // Teste 2: Tentar inserir um perfil de teste
+    const testProfile = {
+      id: `test_${Date.now()}`,
+      email: 'test@example.com',
+      full_name: 'Test User',
+      provider: 'google',
+      google_id: `test_google_${Date.now()}`,
+      email_verified: true,
+      last_login: new Date().toISOString()
+    };
+    
+    const { data: insertData, error: insertError } = await supabase
+      .from('user_profiles')
+      .insert(testProfile)
+      .select()
+      .single();
+    
+    if (insertError) {
+      return res.status(500).json({
+        success: false,
+        test: 'insert_profile',
+        error: insertError.message,
+        code: insertError.code,
+        details: insertError.details,
+        hint: insertError.hint
+      });
+    }
+    
+    // Teste 3: Limpar dados de teste
+    await supabase
+      .from('user_profiles')
+      .delete()
+      .eq('id', testProfile.id);
+    
+    res.json({
+      success: true,
+      message: 'Todos os testes passaram',
+      tests: {
+        table_exists: '✅ Passou',
+        insert_profile: '✅ Passou',
+        cleanup: '✅ Passou'
+      },
+      insertedProfile: insertData,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Erro no teste de perfil:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      code: 'PROFILE_TEST_ERROR',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/**
  * GET /debug/token
  * Endpoint temporário para debug de tokens JWT
  */
