@@ -16,6 +16,7 @@ const adminRoutes = require('./routes/admin');
 const paymentRoutes = require('./routes/payment');
 const profileRoutes = require('./routes/profile');
 const usersRoutes = require('./routes/users');
+const profileConfigRoutes = require('./routes/profile-config');
 const cepRoutes = require('./routes/cep');
 const debugRoutes = require('./routes/debug');
 
@@ -111,6 +112,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/users', usersRoutes);
+app.use('/api/profile-config', profileConfigRoutes);
 
 // Rotas sem prefixo /api (para compatibilidade)
 app.use('/auth', authRoutes);
