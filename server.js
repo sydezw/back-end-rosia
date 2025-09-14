@@ -19,6 +19,7 @@ const usersRoutes = require('./routes/users');
 const profileConfigRoutes = require('./routes/profile-config');
 const cepRoutes = require('./routes/cep');
 const debugRoutes = require('./routes/debug');
+const testAuthRoutes = require('./routes/test-auth');
 
 // Importar middlewares
 const errorHandler = require('./middleware/errorHandler');
@@ -113,6 +114,7 @@ app.use('/api/payment', paymentRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/profile-config', profileConfigRoutes);
+app.use('/api/test-auth', testAuthRoutes);
 
 // Rotas sem prefixo /api (para compatibilidade)
 app.use('/auth', authRoutes);
