@@ -398,6 +398,7 @@ router.post('/login/google', async (req, res, next) => {
         emailVerified: emailVerified
       },
       token: jwtToken,
+      access_token: jwtToken,  // Compatibilidade com frontend que espera access_token
       // Instruções para o frontend evitar salvar "undefined"
       frontend_instructions: {
         validation: {
@@ -406,7 +407,7 @@ router.post('/login/google', async (req, res, next) => {
           clear_on_invalid: 'Limpar localStorage se tokens forem inválidos'
         },
         example_code: {
-          save_token: 'if (data.token && data.token !== "undefined") { localStorage.setItem("access_token", data.token); }',
+          save_token: 'if (data.access_token && data.access_token !== "undefined") { localStorage.setItem("access_token", data.access_token); }',
           validate_before_use: 'const token = localStorage.getItem("access_token"); if (!token || token === "undefined") { /* redirect to login */ }'
         }
       }
