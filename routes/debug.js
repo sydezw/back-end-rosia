@@ -124,4 +124,56 @@ router.get('/env', (req, res) => {
   });
 });
 
+/**
+ * Endpoint para testar autenticação do Supabase com token real
+ */
+router.post('/test-supabase-token', async (req, res) => {
+  try {
+    const { email = 'teste@exemplo.com', password = 'teste123456' } = req.body;
+    
+    // Tentar fazer login
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    });
+    
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        error: error.message,
+        code: 'AUTH_ERROR'
+      });
+    }
+    
+    const { session, user } = data;
+    
+    if (!session || !session.access_token) {
+      return res.status(400).json({
+        success: false,
+        error: 'Não foi possível gerar token de acesso',
+        code: 'NO_TOKEN'
+      });
+    }
+    
+    res.json({
+      success: true,
+      token: session.access_token,
+      user: {
+        id: user.id,
+        email: user.email
+      },
+      expires_at: session.expires_at,
+      message: 'Token válido gerado'
+    });
+    
+  } catch (error) {
+    console.error('Erro ao testar token Supabase:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro interno do servidor',
+      details: error.message
+    });
+  }
+});
+
 module.exports = router;
