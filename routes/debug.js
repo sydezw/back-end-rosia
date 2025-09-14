@@ -124,53 +124,140 @@ router.get('/env', (req, res) => {
   });
 });
 
-/**
- * Endpoint para testar autenticação do Supabase com token real
- */
+// Endpoint para testar configuração do Supabase
+router.get('/supabase-config', (req, res) => {
+  res.json({
+    supabase_url: process.env.SUPABASE_URL ? 'Configurado' : 'Não configurado',
+    supabase_anon_key: process.env.SUPABASE_ANON_KEY ? 'Configurado' : 'Não configurado',
+    supabase_service_key: process.env.SUPABASE_SERVICE_ROLE_KEY ? 'Configurado' : 'Não configurado',
+    url_preview: process.env.SUPABASE_URL ? process.env.SUPABASE_URL.substring(0, 30) + '...' : 'N/A'
+  });
+});
+
+// Endpoint para testar token do Supabase
 router.post('/test-supabase-token', async (req, res) => {
   try {
-    const { email = 'teste@exemplo.com', password = 'teste123456' } = req.body;
+    const { email, password } = req.body;
     
-    // Tentar fazer login
+    if (!email || !password) {
+      return res.status(400).json({
+        error: 'Email e senha são obrigatórios',
+        code: 'MISSING_CREDENTIALS'
+      });
+    }
+
+    // Verificar configuração do Supabase
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
+      return res.status(500).json({
+        error: 'Configuração do Supabase incompleta',
+        code: 'SUPABASE_CONFIG_ERROR',
+        details: {
+          url: !!process.env.SUPABASE_URL,
+          anon_key: !!process.env.SUPABASE_ANON_KEY
+        }
+      });
+    }
+
+    // Tentar fazer login com Supabase
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password
     });
-    
+
     if (error) {
       return res.status(400).json({
-        success: false,
-        error: error.message,
-        code: 'AUTH_ERROR'
+        error: `Erro no login: ${error.message}`,
+        code: 'LOGIN_ERROR',
+        details: error
       });
     }
-    
-    const { session, user } = data;
-    
-    if (!session || !session.access_token) {
+
+    if (!data.session || !data.session.access_token) {
       return res.status(400).json({
-        success: false,
-        error: 'Não foi possível gerar token de acesso',
-        code: 'NO_TOKEN'
+        error: 'Sessão ou token não encontrado',
+        code: 'NO_SESSION'
       });
     }
+
+    // Verificar se o token é válido
+    const { data: userData, error: userError } = await supabase.auth.getUser(data.session.access_token);
     
+    if (userError) {
+      return res.status(400).json({
+        error: `Token inválido: ${userError.message}`,
+        code: 'INVALID_TOKEN',
+        details: userError
+      });
+    }
+
     res.json({
       success: true,
-      token: session.access_token,
+      message: 'Token gerado e validado com sucesso',
+      token: data.session.access_token,
+      user: {
+        id: userData.user.id,
+        email: userData.user.email,
+        created_at: userData.user.created_at
+      },
+      expires_at: data.session.expires_at
+    });
+
+  } catch (error) {
+    console.error('Erro no teste de token Supabase:', error);
+    res.status(500).json({
+      error: 'Erro interno do servidor',
+      code: 'INTERNAL_ERROR',
+      details: error.message
+    });
+  }
+});
+
+// Endpoint para testar validação de token específico
+router.post('/validate-token', async (req, res) => {
+  try {
+    const { token } = req.body;
+    
+    if (!token) {
+      return res.status(400).json({
+        error: 'Token é obrigatório',
+        code: 'MISSING_TOKEN'
+      });
+    }
+
+    // Testar validação do token
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+
+    if (error) {
+      return res.status(401).json({
+        error: `Token inválido: ${error.message}`,
+        code: 'INVALID_TOKEN',
+        details: error
+      });
+    }
+
+    if (!user) {
+      return res.status(401).json({
+        error: 'Usuário não encontrado',
+        code: 'USER_NOT_FOUND'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Token válido',
       user: {
         id: user.id,
-        email: user.email
-      },
-      expires_at: session.expires_at,
-      message: 'Token válido gerado'
+        email: user.email,
+        created_at: user.created_at,
+        last_sign_in_at: user.last_sign_in_at
+      }
     });
-    
+
   } catch (error) {
-    console.error('Erro ao testar token Supabase:', error);
+    console.error('Erro na validação de token:', error);
     res.status(500).json({
-      success: false,
       error: 'Erro interno do servidor',
+      code: 'INTERNAL_ERROR',
       details: error.message
     });
   }
