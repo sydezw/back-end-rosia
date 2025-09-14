@@ -1,6 +1,7 @@
 const { supabase } = require('../config/supabase');
 const jwt = require('jsonwebtoken');
 const { findUserById } = require('../db/user-queries');
+const { checkIfTokenInvalidated } = require('../utils/tokenManager');
 
 /**
  * Middleware para autenticar usuário usando JWT personalizado
@@ -32,6 +33,18 @@ const authenticateToken = async (req, res, next) => {
 
   try {
     console.log('🔍 Verificando token JWT...');
+    
+    // Verificar se o token foi invalidado
+    const isInvalidated = await checkIfTokenInvalidated(token);
+    if (isInvalidated) {
+      console.log('❌ Token foi invalidado (logout realizado)');
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Token foi invalidado. Faça login novamente.',
+        code: 'TOKEN_INVALIDATED'
+      });
+    }
+    
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     console.log('✅ Token JWT válido:', { userId: decoded.userId, email: decoded.email });
     

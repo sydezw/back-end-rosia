@@ -1,123 +1,88 @@
-# Soluções Implementadas - Configuração de Perfil
+# 📋 SOLUÇÕES IMPLEMENTADAS - ROSIA LOJA
 
-## Problema Resolvido
+## ✅ Análise Completa - Problema de Logout/Login Identificado
 
-O erro `403 Forbidden - Token inválido ou expirado` no endpoint `PUT /api/users/profile` foi causado por incompatibilidade entre os tipos de token:
-- **Frontend**: Enviava tokens do Supabase
-- **Backend**: Esperava JWT personalizado
+### 🔍 Diagnóstico Detalhado:
+- **Backend:** ❌ Logout não invalida tokens corretamente
+- **Frontend:** ✅ Implementação correta, mas dependente do backend
+- **Causa Raiz:** Endpoint `/api/auth/logout` não invalida tokens no servidor
+- **Sintoma:** Token antigo permanece válido após logout
 
-## Alterações Realizadas
+### 📋 Análise do Código Frontend:
+- **AuthContext.tsx:** Logout limpa dados locais corretamente
+- **auth-api.ts:** Funções de login/logout implementadas corretamente
+- **Fluxo:** Frontend faz logout na API, mas backend não invalida token
 
-### 1. Correção do Middleware de Autenticação
+### 💡 Solução Criada:
+**Documento para Backend:** `BACKEND-LOGOUT-LOGIN-FIXES.md`
+- Correções necessárias no endpoint `/api/auth/logout`
+- Melhorias no middleware de autenticação
+- Sistema de invalidação de tokens
+- Testes e validações completas
 
-**Arquivo**: `routes/users.js`
-- ✅ Alterado de `authenticateToken` (JWT personalizado) para `authenticateUser` (Supabase)
-- ✅ Agora aceita tokens do Supabase corretamente
+### 🛠️ Ferramentas de Debug:
+- `DEBUG-TOKEN-401.md` - Diagnóstico do problema de token
+- `BACKEND-LOGOUT-LOGIN-FIXES.md` - Correções para o backend
+- Endpoint: `/api/debug/test-auth-middleware` - Testar autenticação
 
-### 2. Novo Endpoint de Configuração Completa
+---
 
-**Arquivo**: `routes/profile-config.js` (NOVO)
-- ✅ Endpoint: `PUT /api/profile-config/complete`
-- ✅ Endpoint: `GET /api/profile-config/complete`
-- ✅ Separação correta dos dados:
-  - **user_profiles**: CPF, telefone, data_nascimento
-  - **user_addresses**: CEP, logradouro, número, bairro, cidade, estado, complemento
+## ✅ Correções Implementadas no Frontend
 
-### 3. Validações Implementadas
+### 1. **ProfileSettings.tsx - Campo `name` Adicionado**
+- ✅ Campo `addressName` adicionado ao formulário
+- ✅ Interface `AddressFormData` atualizada
+- ✅ Validação implementada para campo obrigatório
+- ✅ Função `handleSave` atualizada para incluir o campo
 
-- ✅ **CPF**: Formato e dígitos verificadores
-- ✅ **Telefone**: Formato brasileiro (11 dígitos)
-- ✅ **CEP**: Formato brasileiro (8 dígitos)
-- ✅ **Data de nascimento**: Formato ISO e idade mínima
-- ✅ **Campos obrigatórios**: Nome, logradouro, número, bairro, cidade, estado
+### 2. **Validações e Formatações**
+- ✅ Validação de CPF com formato XXX.XXX.XXX-XX
+- ✅ Validação de telefone com formato (XX) XXXXX-XXXX
+- ✅ Validação de CEP e busca automática via ViaCEP
+- ✅ Campos obrigatórios marcados com asterisco (*)
 
-## Como Usar os Novos Endpoints
+### 3. **Estrutura de Dados**
+- ✅ Interface `AddressFormData` compatível com backend
+- ✅ Mapeamento correto para tabela `user_addresses`
+- ✅ Foreign key configurada para `auth.users` (Supabase)
 
-### Endpoint de Configuração Completa
+---
 
-```javascript
-// PUT /api/profile-config/complete
-const dadosCompletos = {
-  // Dados para user_profiles
-  cpf: '12345678901',
-  telefone: '11987654321', 
-  data_nascimento: '1990-01-01',
-  
-  // Dados para user_addresses
-  cep: '01234567',
-  logradouro: 'Rua Exemplo',
-  numero: '123',
-  bairro: 'Centro',
-  cidade: 'São Paulo',
-  estado: 'SP',
-  complemento: 'Apto 45' // Opcional
-};
+## 📋 Próximos Passos:
 
-// Headers necessários
-const headers = {
-  'Authorization': `Bearer ${supabaseToken}`,
-  'Content-Type': 'application/json'
-};
-```
+### ⚡ Para o Backend:
+1. **Implementar correções** do arquivo `BACKEND-LOGOUT-LOGIN-FIXES.md`
+2. **Corrigir endpoint** `/api/auth/logout` para invalidar tokens
+3. **Testar fluxo** completo de logout/login
 
-### Endpoint de Consulta
+### 🧪 Para Validação:
+1. **Testar logout/login** após correções do backend
+2. **Verificar se erro 401** foi resolvido no ProfileSettings
+3. **Validar geração** de novos tokens após login
+4. **Testar formulário** de endereços completo
 
-```javascript
-// GET /api/profile-config/complete
-// Retorna dados completos do perfil e endereço
-const response = await fetch('/api/profile-config/complete', {
-  headers: {
-    'Authorization': `Bearer ${supabaseToken}`
-  }
-});
-```
+---
 
-## Estrutura das Tabelas no Supabase
+## 🔧 Arquivos Modificados:
 
-### user_profiles
-```sql
-- id (uuid, primary key)
-- user_id (uuid, foreign key para auth.users)
-- cpf (text)
-- telefone (text)
-- data_nascimento (date)
-- created_at (timestamp)
-- updated_at (timestamp)
-```
+### Frontend:
+- `src/components/ProfileSettings.tsx` - Campo name e validações
+- `src/lib/auth-api.ts` - Funções de autenticação
+- `src/contexts/AuthContext.tsx` - Contexto de autenticação
 
-### user_addresses
-```sql
-- id (uuid, primary key)
-- user_id (uuid, foreign key para auth.users)
-- cep (text)
-- logradouro (text)
-- numero (text)
-- bairro (text)
-- cidade (text)
-- estado (text)
-- complemento (text, nullable)
-- created_at (timestamp)
-- updated_at (timestamp)
-```
+### Documentação:
+- `DEBUG-TOKEN-401.md` - Diagnóstico do problema
+- `BACKEND-LOGOUT-LOGIN-FIXES.md` - Correções para backend
+- `SOLUCOES-IMPLEMENTADAS.md` - Este arquivo
 
-## Status Atual
+---
 
-- ✅ **Middleware corrigido**: Aceita tokens do Supabase
-- ✅ **Endpoints criados**: Configuração completa implementada
-- ✅ **Validações ativas**: CPF, telefone, CEP, campos obrigatórios
-- ✅ **Deploy realizado**: Alterações no ar
-- ⚠️ **Teste pendente**: Necessário token válido do Supabase para teste completo
+## 📞 Status Atual:
 
-## Próximos Passos
+**Frontend:** ✅ Pronto e funcionando
+**Backend:** 🔄 Aguardando implementação das correções
+**Problema Principal:** Token não é invalidado no logout
+**Solução:** Implementar correções do `BACKEND-LOGOUT-LOGIN-FIXES.md`
 
-1. **Frontend**: Atualizar para usar o novo endpoint `/api/profile-config/complete`
-2. **Teste**: Validar com token real do Supabase
-3. **Supabase**: Verificar se as tabelas `user_profiles` e `user_addresses` existem
-4. **Políticas RLS**: Configurar permissões no Supabase se necessário
-
-## Observações Importantes
-
-- O endpoint antigo `/api/users/profile` ainda funciona, mas agora usa autenticação Supabase
-- O novo endpoint `/api/profile-config/complete` é mais robusto e completo
-- Todas as validações são feitas no backend antes de salvar no banco
-- Os dados são separados corretamente entre as duas tabelas
+**Data:** $(date)
+**Última Atualização:** Análise completa do problema de logout/login

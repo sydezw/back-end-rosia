@@ -2,6 +2,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const { supabase } = require('../config/supabase');
 const { findUserById } = require('../db/user-queries');
+const { checkIfTokenInvalidated, getTokenStats } = require('../utils/tokenManager');
 const router = express.Router();
 
 /**
@@ -263,7 +264,7 @@ router.post('/validate-token', async (req, res) => {
   }
 });
 
-// Endpoint para testar middleware de autenticação
+// Endpoint para testar middleware de autenticação com sistema de invalidação
 router.get('/test-auth-middleware', async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -287,6 +288,67 @@ router.get('/test-auth-middleware', async (req, res) => {
     const token = authHeader.substring(7);
     console.log('- Token extraído:', token.substring(0, 20) + '...');
     
+    // Verificar se o token foi invalidado
+    const isInvalidated = await checkIfTokenInvalidated(token);
+    console.log('- Token invalidado?', isInvalidated);
+    
+    if (isInvalidated) {
+      return res.status(401).json({
+        success: false,
+        error: 'Token foi invalidado (logout realizado)',
+        code: 'TOKEN_INVALIDATED',
+        debug: {
+          tokenLength: token.length,
+          invalidated: true,
+          tokenStats: getTokenStats()
+        }
+      });
+    }
+    
+    // Verificar se é um JWT personalizado
+    let isCustomJWT = false;
+    let jwtUser = null;
+    
+    try {
+      if (process.env.JWT_SECRET) {
+        jwtUser = jwt.verify(token, process.env.JWT_SECRET);
+        isCustomJWT = true;
+        console.log('- JWT personalizado válido:', { userId: jwtUser.userId, email: jwtUser.email });
+        
+        // Buscar usuário no banco
+        const user = await findUserById(jwtUser.userId);
+        if (!user) {
+          return res.status(401).json({
+            success: false,
+            error: 'Usuário não encontrado no banco',
+            code: 'USER_NOT_FOUND',
+            debug: {
+              tokenType: 'custom_jwt',
+              userId: jwtUser.userId
+            }
+          });
+        }
+        
+        return res.json({
+          success: true,
+          message: 'Token JWT personalizado válido e middleware funcionando',
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email
+          },
+          debug: {
+            tokenType: 'custom_jwt',
+            tokenLength: token.length,
+            invalidated: false,
+            tokenStats: getTokenStats()
+          }
+        });
+      }
+    } catch (jwtError) {
+      console.log('- Não é JWT personalizado, testando com Supabase...');
+    }
+    
     // Verificar configuração do Supabase
     if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
       return res.status(500).json({
@@ -309,29 +371,53 @@ router.get('/test-auth-middleware', async (req, res) => {
         success: false,
         error: 'Token inválido ou expirado',
         debug: {
+          tokenType: 'supabase',
           supabaseError: error ? error.message : null,
           hasUser: !!user,
-          tokenLength: token.length
+          tokenLength: token.length,
+          invalidated: false,
+          tokenStats: getTokenStats()
         }
       });
     }
     
     res.json({
       success: true,
-      message: 'Token válido e middleware funcionando',
+      message: 'Token Supabase válido e middleware funcionando',
       user: {
         id: user.id,
         email: user.email,
         created_at: user.created_at
       },
       debug: {
+        tokenType: 'supabase',
         tokenLength: token.length,
-        supabaseConnected: true
+        supabaseConnected: true,
+        invalidated: false,
+        tokenStats: getTokenStats()
       }
     });
     
   } catch (error) {
     console.error('❌ Erro no teste de middleware:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro interno do servidor',
+      details: error.message
+    });
+  }
+});
+
+// Endpoint para obter estatísticas dos tokens invalidados
+router.get('/token-stats', (req, res) => {
+  try {
+    const stats = getTokenStats();
+    res.json({
+      success: true,
+      stats
+    });
+  } catch (error) {
+    console.error('❌ Erro ao obter estatísticas:', error);
     res.status(500).json({
       success: false,
       error: 'Erro interno do servidor',

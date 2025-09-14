@@ -2,6 +2,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const { supabase, supabaseAdmin } = require('../config/supabase');
 const { authenticateUser, authenticateToken } = require('../middleware/auth');
+const { invalidateToken } = require('../utils/tokenManager');
 const { hashPassword, comparePassword } = require('../utils/password');
 const { verifyGoogleToken } = require('../utils/google-auth');
 const { 
@@ -466,25 +467,34 @@ router.post('/refresh', async (req, res, next) => {
 
 /**
  * POST /auth/logout
- * Logout do usuário
+ * Logout do usuário com invalidação de token
  */
 router.post('/logout', authenticateToken, async (req, res, next) => {
   try {
+    // Obter token do header
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    
+    if (token) {
+      // Invalidar token no servidor
+      await invalidateToken(token);
+      console.log('✅ Token invalidado no logout');
+    }
+    
+    // Também fazer logout no Supabase (se aplicável)
     const { error } = await supabase.auth.signOut();
-
     if (error) {
-      return res.status(400).json({
-        error: 'Erro ao fazer logout',
-        details: error.message
-      });
+      console.log('⚠️ Aviso no logout Supabase:', error.message);
+      // Não retornar erro, pois o token já foi invalidado
     }
 
     res.json({
       success: true,
-      message: 'Logout realizado com sucesso'
+      message: 'Logout realizado com sucesso. Token invalidado.'
     });
 
   } catch (error) {
+    console.error('Erro no logout:', error);
     next(error);
   }
 });
@@ -852,13 +862,31 @@ router.get('/verify', authenticateToken, async (req, res) => {
 
 /**
  * POST /auth/logout-jwt
- * Logout (JWT é stateless, apenas confirma)
+ * Logout JWT com invalidação de token
  */
 router.post('/logout-jwt', authenticateToken, async (req, res) => {
-  res.json({
-    success: true,
-    message: 'Logout realizado com sucesso'
-  });
+  try {
+    // Obter token do header
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    
+    if (token) {
+      // Invalidar token no servidor
+      await invalidateToken(token);
+      console.log('✅ Token JWT invalidado no logout');
+    }
+    
+    res.json({
+      success: true,
+      message: 'Logout realizado com sucesso. Token invalidado.'
+    });
+  } catch (error) {
+    console.error('Erro no logout JWT:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erro interno no logout'
+    });
+  }
 });
 
 module.exports = router;
