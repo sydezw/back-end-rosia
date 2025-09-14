@@ -17,6 +17,7 @@ const paymentRoutes = require('./routes/payment');
 const profileRoutes = require('./routes/profile');
 const usersRoutes = require('./routes/users');
 const cepRoutes = require('./routes/cep');
+const debugRoutes = require('./routes/debug');
 
 // Importar middlewares
 const errorHandler = require('./middleware/errorHandler');
@@ -100,6 +101,7 @@ app.use('/api/products', productRoutes);
 app.use('/api/shipping', shippingRoutes);
 app.use('/api/webhook', webhookRoutes);
 app.use('/api/cep', cepRoutes);
+app.use('/api/debug', debugRoutes);
 
 // Rotas protegidas
 app.use('/api/orders', authenticateToken, orderRoutes);

@@ -59,24 +59,50 @@ class UsersController {
     try {
       const userId = req.user.id;
       
-      const { data: user, error } = await supabase
-        .from('usuarios')
-        .select('id, nome, email, cpf, telefone, data_nascimento, avatar_url, email_verificado, criadoem, atualizadoem')
+      console.log('🔍 Buscando perfil do usuário:', userId);
+      
+      // Buscar dados do usuário na tabela user_profiles
+      const { data: userProfile, error } = await supabase
+        .from('user_profiles')
+        .select('*')
         .eq('id', userId)
         .single();
       
-      if (error || !user) {
-        return res.status(404).json(
+      if (error) {
+        console.log('❌ Erro ao buscar perfil na user_profiles:', error);
+        
+        // Se não encontrou na user_profiles, buscar dados básicos do auth
+        if (error.code === 'PGRST116') {
+          console.log('📝 Perfil não encontrado, buscando dados do auth...');
+          
+          // Buscar dados básicos do usuário autenticado
+          const authUser = req.user;
+          
+          return res.json(formatResponse(true, { 
+            user: {
+              id: authUser.id,
+              email: authUser.email,
+              nome: authUser.nome || authUser.full_name,
+              avatar_url: authUser.avatar_url,
+              email_verificado: authUser.email_verificado || false,
+              criadoem: authUser.criadoem || new Date().toISOString()
+            }
+          }));
+        }
+        
+        return res.status(500).json(
           formatResponse(false, null, null, {
-            code: 'USER_NOT_FOUND',
-            message: 'Usuário não encontrado'
+            code: 'INTERNAL_ERROR',
+            message: 'Erro interno do servidor'
           })
         );
       }
       
-      res.json(formatResponse(true, { user }));
+      console.log('✅ Perfil encontrado:', { id: userProfile.id, email: userProfile.email });
+      
+      res.json(formatResponse(true, { user: userProfile }));
     } catch (error) {
-      console.error('Erro ao buscar perfil:', error);
+      console.error('❌ Erro ao buscar perfil:', error);
       res.status(500).json(
         formatResponse(false, null, null, {
           code: 'INTERNAL_ERROR',
@@ -90,28 +116,40 @@ class UsersController {
   static async updateProfile(req, res) {
     try {
       const userId = req.user.id;
-      const { nome, cpf, telefone, data_nascimento } = req.body;
+      const { nome, full_name, cpf, telefone, phone, data_nascimento, birth_date, gender } = req.body;
+      
+      console.log('🔄 Atualizando perfil do usuário:', userId, req.body);
+      
+      // Normalizar campos (aceitar tanto formato antigo quanto novo)
+      const normalizedData = {
+        full_name: full_name || nome,
+        cpf: cpf,
+        phone: phone || telefone,
+        birth_date: birth_date || data_nascimento,
+        gender: gender
+      };
       
       // Validações
       const errors = {};
       
-      if (!nome || nome.trim().length < 2) {
+      if (!normalizedData.full_name || normalizedData.full_name.trim().length < 2) {
         errors.nome = ['Nome é obrigatório e deve ter pelo menos 2 caracteres'];
       }
       
-      if (cpf && !validateCPF(cpf)) {
+      if (normalizedData.cpf && !validateCPF(normalizedData.cpf)) {
         errors.cpf = ['CPF inválido'];
       }
       
-      if (telefone && !validatePhone(telefone)) {
+      if (normalizedData.phone && !validatePhone(normalizedData.phone)) {
         errors.telefone = ['Telefone inválido'];
       }
       
-      if (data_nascimento && isNaN(Date.parse(data_nascimento))) {
+      if (normalizedData.birth_date && isNaN(Date.parse(normalizedData.birth_date))) {
         errors.data_nascimento = ['Data de nascimento inválida'];
       }
       
       if (Object.keys(errors).length > 0) {
+        console.log('❌ Erros de validação:', errors);
         return res.status(400).json(
           formatResponse(false, null, null, {
             code: 'VALIDATION_ERROR',
@@ -122,15 +160,16 @@ class UsersController {
       }
       
       // Verificar se CPF já está em uso por outro usuário
-      if (cpf) {
+      if (normalizedData.cpf) {
         const { data: existingUser } = await supabase
-          .from('usuarios')
+          .from('user_profiles')
           .select('id')
-          .eq('cpf', cpf)
+          .eq('cpf', normalizedData.cpf)
           .neq('id', userId)
           .single();
         
         if (existingUser) {
+          console.log('❌ CPF já em uso por outro usuário');
           return res.status(400).json(
             formatResponse(false, null, null, {
               code: 'VALIDATION_ERROR',
@@ -143,25 +182,48 @@ class UsersController {
         }
       }
       
-      // Atualizar perfil
+      // Preparar dados para atualização
       const updateData = {
-        nome: nome.trim(),
-        atualizadoem: new Date().toISOString()
+        updated_at: new Date().toISOString()
       };
       
-      if (cpf) updateData.cpf = cpf;
-      if (telefone) updateData.telefone = telefone;
-      if (data_nascimento) updateData.data_nascimento = data_nascimento;
+      if (normalizedData.full_name) updateData.full_name = normalizedData.full_name.trim();
+      if (normalizedData.cpf) updateData.cpf = normalizedData.cpf;
+      if (normalizedData.phone) updateData.phone = normalizedData.phone;
+      if (normalizedData.birth_date) updateData.birth_date = normalizedData.birth_date;
+      if (normalizedData.gender) updateData.gender = normalizedData.gender;
       
-      const { data: user, error } = await supabase
-        .from('usuarios')
-        .update(updateData)
+      console.log('📝 Dados para atualização:', updateData);
+      
+      // Verificar se o perfil já existe
+      const { data: existingProfile } = await supabase
+        .from('user_profiles')
+        .select('id')
         .eq('id', userId)
-        .select('id, nome, email, cpf, telefone, data_nascimento, atualizadoem')
         .single();
       
-      if (error) {
-        console.error('Erro ao atualizar perfil:', error);
+      let result;
+      if (existingProfile) {
+        // Atualizar perfil existente
+        console.log('🔄 Atualizando perfil existente');
+        result = await supabase
+          .from('user_profiles')
+          .update(updateData)
+          .eq('id', userId)
+          .select()
+          .single();
+      } else {
+        // Criar novo perfil
+        console.log('📝 Criando novo perfil');
+        result = await supabase
+          .from('user_profiles')
+          .insert({ ...updateData, id: userId, email: req.user.email })
+          .select()
+          .single();
+      }
+      
+      if (result.error) {
+        console.error('❌ Erro ao salvar perfil:', result.error);
         return res.status(500).json(
           formatResponse(false, null, null, {
             code: 'INTERNAL_ERROR',
@@ -170,9 +232,11 @@ class UsersController {
         );
       }
       
-      res.json(formatResponse(true, { user }, 'Perfil atualizado com sucesso'));
+      console.log('✅ Perfil atualizado com sucesso:', result.data.id);
+      
+      res.json(formatResponse(true, { user: result.data }, 'Perfil atualizado com sucesso'));
     } catch (error) {
-      console.error('Erro ao atualizar perfil:', error);
+      console.error('❌ Erro ao atualizar perfil:', error);
       res.status(500).json(
         formatResponse(false, null, null, {
           code: 'INTERNAL_ERROR',

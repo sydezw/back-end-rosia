@@ -9,19 +9,36 @@ const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
+  // Log para debug
+  console.log('🔐 Auth Debug - Headers:', {
+    authorization: req.headers.authorization ? 'Present' : 'Missing',
+    userAgent: req.headers['user-agent'],
+    origin: req.headers.origin
+  });
+  console.log('🔐 Auth Debug - Token:', {
+    provided: !!token,
+    length: token?.length,
+    preview: token ? `${token.substring(0, 20)}...` : 'N/A'
+  });
+
   if (!token) {
+    console.log('❌ Auth Error: Token não fornecido');
     return res.status(401).json({ 
       success: false, 
-      message: 'Token não fornecido',
+      message: 'Token de acesso requerido',
       code: 'MISSING_TOKEN'
     });
   }
 
   try {
+    console.log('🔍 Verificando token JWT...');
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log('✅ Token JWT válido:', { userId: decoded.userId, email: decoded.email });
+    
     const user = await findUserById(decoded.userId);
     
     if (!user) {
+      console.log('❌ Usuário não encontrado no banco:', decoded.userId);
       return res.status(401).json({ 
         success: false, 
         message: 'Usuário não encontrado',
@@ -29,13 +46,19 @@ const authenticateToken = async (req, res, next) => {
       });
     }
 
+    console.log('✅ Usuário autenticado:', { id: user.id, email: user.email });
     req.user = user;
     req.userId = user.id;
     next();
   } catch (error) {
+    console.log('❌ Erro na validação do token:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack?.split('\n')[0]
+    });
     return res.status(403).json({ 
       success: false, 
-      message: 'Token inválido',
+      message: 'Token inválido ou expirado',
       code: 'INVALID_TOKEN'
     });
   }
