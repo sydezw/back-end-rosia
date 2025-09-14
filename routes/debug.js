@@ -263,4 +263,81 @@ router.post('/validate-token', async (req, res) => {
   }
 });
 
+// Endpoint para testar middleware de autenticação
+router.get('/test-auth-middleware', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    
+    console.log('🔍 Debug Auth Middleware:');
+    console.log('- Authorization Header:', authHeader ? 'Presente' : 'Ausente');
+    console.log('- Header completo:', authHeader);
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        error: 'Token de acesso requerido',
+        debug: {
+          hasHeader: !!authHeader,
+          startsWithBearer: authHeader ? authHeader.startsWith('Bearer ') : false,
+          headerValue: authHeader || 'null'
+        }
+      });
+    }
+
+    const token = authHeader.substring(7);
+    console.log('- Token extraído:', token.substring(0, 20) + '...');
+    
+    // Verificar configuração do Supabase
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
+      return res.status(500).json({
+        success: false,
+        error: 'Configuração do Supabase não encontrada',
+        config: {
+          url: !!process.env.SUPABASE_URL,
+          key: !!process.env.SUPABASE_ANON_KEY
+        }
+      });
+    }
+    
+    // Testar token com Supabase
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    
+    console.log('- Resultado Supabase:', { user: !!user, error: !!error });
+    
+    if (error || !user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Token inválido ou expirado',
+        debug: {
+          supabaseError: error ? error.message : null,
+          hasUser: !!user,
+          tokenLength: token.length
+        }
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Token válido e middleware funcionando',
+      user: {
+        id: user.id,
+        email: user.email,
+        created_at: user.created_at
+      },
+      debug: {
+        tokenLength: token.length,
+        supabaseConnected: true
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Erro no teste de middleware:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro interno do servidor',
+      details: error.message
+    });
+  }
+});
+
 module.exports = router;
