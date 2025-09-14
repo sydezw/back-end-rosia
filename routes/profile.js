@@ -1,13 +1,13 @@
 const express = require('express');
 const { supabase, supabaseAdmin } = require('../config/supabase');
-const { authenticateUser } = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth');
 const router = express.Router();
 
 /**
  * GET /profile/me
  * Buscar perfil completo do usuário logado
  */
-router.get('/me', authenticateUser, async (req, res, next) => {
+router.get('/me', authenticateToken, async (req, res, next) => {
   try {
     const userId = req.user.id;
 
@@ -38,7 +38,7 @@ router.get('/me', authenticateUser, async (req, res, next) => {
  * PUT /profile/me
  * Atualizar dados pessoais do usuário
  */
-router.put('/me', authenticateUser, async (req, res, next) => {
+router.put('/me', authenticateToken, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const {
@@ -114,7 +114,7 @@ router.put('/me', authenticateUser, async (req, res, next) => {
  * GET /profile/addresses
  * Listar endereços do usuário
  */
-router.get('/addresses', authenticateUser, async (req, res, next) => {
+router.get('/addresses', authenticateToken, async (req, res, next) => {
   try {
     const userId = req.user.id;
 
@@ -146,7 +146,7 @@ router.get('/addresses', authenticateUser, async (req, res, next) => {
  * POST /profile/addresses
  * Adicionar novo endereço
  */
-router.post('/addresses', authenticateUser, async (req, res, next) => {
+router.post('/addresses', authenticateToken, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const {
@@ -223,7 +223,7 @@ router.post('/addresses', authenticateUser, async (req, res, next) => {
  * PUT /profile/addresses/:id
  * Atualizar endereço
  */
-router.put('/addresses/:id', authenticateUser, async (req, res, next) => {
+router.put('/addresses/:id', authenticateToken, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const addressId = req.params.id;
@@ -281,7 +281,7 @@ router.put('/addresses/:id', authenticateUser, async (req, res, next) => {
  * DELETE /profile/addresses/:id
  * Remover endereço
  */
-router.delete('/addresses/:id', authenticateUser, async (req, res, next) => {
+router.delete('/addresses/:id', authenticateToken, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const addressId = req.params.id;
@@ -312,7 +312,7 @@ router.delete('/addresses/:id', authenticateUser, async (req, res, next) => {
  * GET /profile/cart
  * Buscar itens do carrinho
  */
-router.get('/cart', authenticateUser, async (req, res, next) => {
+router.get('/cart', authenticateToken, async (req, res, next) => {
   try {
     const userId = req.user.id;
 
@@ -350,7 +350,7 @@ router.get('/cart', authenticateUser, async (req, res, next) => {
  * POST /profile/cart
  * Adicionar item ao carrinho
  */
-router.post('/cart', authenticateUser, async (req, res, next) => {
+router.post('/cart', authenticateToken, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const { product_id, quantity = 1, size, color } = req.body;
@@ -447,7 +447,7 @@ router.post('/cart', authenticateUser, async (req, res, next) => {
  * PUT /profile/cart/:id
  * Atualizar quantidade do item no carrinho
  */
-router.put('/cart/:id', authenticateUser, async (req, res, next) => {
+router.put('/cart/:id', authenticateToken, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const itemId = req.params.id;
@@ -511,7 +511,7 @@ router.put('/cart/:id', authenticateUser, async (req, res, next) => {
  * DELETE /profile/cart/:id
  * Remover item do carrinho
  */
-router.delete('/cart/:id', authenticateUser, async (req, res, next) => {
+router.delete('/cart/:id', authenticateToken, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const itemId = req.params.id;
@@ -542,7 +542,7 @@ router.delete('/cart/:id', authenticateUser, async (req, res, next) => {
  * DELETE /profile/cart
  * Limpar carrinho
  */
-router.delete('/cart', authenticateUser, async (req, res, next) => {
+router.delete('/cart', authenticateToken, async (req, res, next) => {
   try {
     const userId = req.user.id;
 
@@ -571,7 +571,7 @@ router.delete('/cart', authenticateUser, async (req, res, next) => {
  * GET /profile/favorites
  * Listar produtos favoritos
  */
-router.get('/favorites', authenticateUser, async (req, res, next) => {
+router.get('/favorites', authenticateToken, async (req, res, next) => {
   try {
     const userId = req.user.id;
 
@@ -613,7 +613,7 @@ router.get('/favorites', authenticateUser, async (req, res, next) => {
  * POST /profile/favorites
  * Adicionar produto aos favoritos
  */
-router.post('/favorites', authenticateUser, async (req, res, next) => {
+router.post('/favorites', authenticateToken, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const { product_id } = req.body;
@@ -671,7 +671,7 @@ router.post('/favorites', authenticateUser, async (req, res, next) => {
  * DELETE /profile/favorites/:product_id
  * Remover produto dos favoritos
  */
-router.delete('/favorites/:product_id', authenticateUser, async (req, res, next) => {
+router.delete('/favorites/:product_id', authenticateToken, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const productId = req.params.product_id;

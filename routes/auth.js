@@ -246,7 +246,7 @@ router.post('/login/google', async (req, res, next) => {
     // Gerar JWT token para sessão
     const jwtToken = jwt.sign(
       {
-        userId: userProfile?.id || `google_${googleId}`,
+        userId: userProfile?.id || userId,
         email: email,
         provider: 'google'
       },
@@ -257,7 +257,7 @@ router.post('/login/google', async (req, res, next) => {
     res.json({
       success: true,
       user: {
-        id: userProfile?.id || `google_${googleId}`,
+        id: userProfile?.id || userId,
         email: email,
         name: userProfile?.full_name || name,
         avatar: userProfile?.avatar_url || avatar,
