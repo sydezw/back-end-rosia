@@ -1,5 +1,5 @@
 const { supabase, supabaseAdmin } = require('../config/supabase');
-const { authenticateUser } = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth');
 
 // Validação de CPF
 const isValidCPF = (cpf) => {

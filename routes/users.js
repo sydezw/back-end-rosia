@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authenticateUser } = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth');
 const UsersController = require('../controllers/UsersController');
 const multer = require('multer');
 const path = require('path');
@@ -23,7 +23,7 @@ const upload = multer({
 });
 
 // Middleware de autenticação para todas as rotas
-router.use(authenticateUser);
+router.use(authenticateToken);
 
 // Rotas de perfil
 router.get('/profile', UsersController.getProfile);

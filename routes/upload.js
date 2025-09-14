@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authenticateUser } = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth');
 const {
   uploadSingle,
   uploadMultiple,
@@ -17,7 +17,7 @@ const {
 const { supabase } = require('../config/supabase');
 
 // Middleware de autenticação para todas as rotas de upload
-router.use(authenticateUser);
+router.use(authenticateToken);
 
 // Upload de uma única imagem
 router.post('/single', uploadSingle, processImage, async (req, res) => {

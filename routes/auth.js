@@ -468,7 +468,7 @@ router.post('/refresh', async (req, res, next) => {
  * POST /auth/logout
  * Logout do usuário
  */
-router.post('/logout', authenticateUser, async (req, res, next) => {
+router.post('/logout', authenticateToken, async (req, res, next) => {
   try {
     const { error } = await supabase.auth.signOut();
 
@@ -493,7 +493,7 @@ router.post('/logout', authenticateUser, async (req, res, next) => {
  * GET /auth/me
  * Retorna dados do usuário autenticado com perfil completo
  */
-router.get('/me', authenticateUser, async (req, res, next) => {
+router.get('/me', authenticateToken, async (req, res, next) => {
   try {
     const userId = req.user.id;
 

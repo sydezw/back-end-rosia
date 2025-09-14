@@ -20,7 +20,7 @@ const cepRoutes = require('./routes/cep');
 
 // Importar middlewares
 const errorHandler = require('./middleware/errorHandler');
-const { authenticateUser } = require('./middleware/auth');
+const { authenticateToken } = require('./middleware/auth');
 const { requestLogger, errorLogger, logger } = require('./middleware/logger');
 
 // Importar configuração do storage
@@ -102,8 +102,8 @@ app.use('/api/webhook', webhookRoutes);
 app.use('/api/cep', cepRoutes);
 
 // Rotas protegidas
-app.use('/api/orders', authenticateUser, orderRoutes);
-app.use('/api/checkout', authenticateUser, checkoutRoutes);
+app.use('/api/orders', authenticateToken, orderRoutes);
+app.use('/api/checkout', authenticateToken, checkoutRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/payment', paymentRoutes);
@@ -115,8 +115,8 @@ app.use('/auth', authRoutes);
 app.use('/products', productRoutes);
 app.use('/shipping', shippingRoutes);
 app.use('/webhook', webhookRoutes);
-app.use('/orders', authenticateUser, orderRoutes);
-app.use('/checkout', authenticateUser, checkoutRoutes);
+app.use('/orders', authenticateToken, orderRoutes);
+app.use('/checkout', authenticateToken, checkoutRoutes);
 app.use('/upload', uploadRoutes);
 app.use('/admin', adminRoutes);
 app.use('/payment', paymentRoutes);

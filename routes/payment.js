@@ -1,7 +1,7 @@
 const express = require('express');
 const { getMercadoPago } = require('../config/mercadopago');
 const { supabase } = require('../config/supabase');
-const { authenticateUser } = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth');
 const router = express.Router();
 
 /**
@@ -72,7 +72,7 @@ router.post('/card-token', async (req, res, next) => {
  * POST /payment/card
  * Processa pagamento com cartão de crédito
  */
-router.post('/card', authenticateUser, async (req, res, next) => {
+router.post('/card', authenticateToken, async (req, res, next) => {
   try {
     const {
       token,
@@ -247,7 +247,7 @@ router.post('/card', authenticateUser, async (req, res, next) => {
  * GET /payment/:id
  * Consulta status de um pagamento
  */
-router.get('/:id', authenticateUser, async (req, res, next) => {
+router.get('/:id', authenticateToken, async (req, res, next) => {
   try {
     const { id } = req.params;
 
