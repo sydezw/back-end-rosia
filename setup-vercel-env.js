@@ -13,11 +13,11 @@ const { execSync } = require('child_process');
 
 // ⚠️ IMPORTANTE: Substitua pelas credenciais reais antes de executar
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || 'SUBSTITUA_PELA_CREDENCIAL_REAL';
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || 'SUBSTITUA_PELA_CREDENCIAL_REAL';
+const  = process.env.GOOGLE_CLIENT_SECRET || 'SUBSTITUA_PELA_CREDENCIAL_REAL';
 
 function runCommand(command) {
   try {
-    console.log(`🔄 Executando: ${command}`);
+    console.log(`🔄 ExecutGOOGLE_CLIENT_SECRETando: ${command}`);
     const result = execSync(command, { encoding: 'utf8', stdio: 'inherit' });
     console.log('✅ Sucesso!');
     return result;
