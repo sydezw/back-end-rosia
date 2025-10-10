@@ -20,6 +20,7 @@ const profileConfigRoutes = require('./routes/profile-config');
 const cepRoutes = require('./routes/cep');
 const debugRoutes = require('./routes/debug');
 const testAuthRoutes = require('./routes/test-auth');
+const googleUsersRoutes = require('./routes/google-users');
 
 // Importar middlewares
 const errorHandler = require('./middleware/errorHandler');
@@ -30,7 +31,7 @@ const { requestLogger, errorLogger, logger } = require('./middleware/logger');
 const { createBucketIfNotExists } = require('./config/storage');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3030;
 
 // Rate limiting
 const limiter = rateLimit({
@@ -52,6 +53,12 @@ app.use((req, res, next) => {
   res.header('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   res.header('Cross-Origin-Embedder-Policy', 'unsafe-none');
   res.header('Cross-Origin-Resource-Policy', 'cross-origin');
+  
+  // Adicionar headers específicos para debug de CORS
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`🔍 CORS Debug - Origin: ${req.headers.origin}, Method: ${req.method}, Path: ${req.path}`);
+  }
+  
   next();
 });
 
@@ -62,6 +69,7 @@ app.use(cors({
     'http://localhost:3000',
     'http://localhost:5173', // Vite dev server
     'http://localhost:8080', // Frontend local na porta 8080
+    'http://127.0.0.1:8080', // Frontend local na porta 8080 (127.0.0.1)
     'https://www.rosia.com.br',
     'https://rosia.com.br', // Domínio sem www
     'https://rosialoja-front-rosialastcommit.vercel.app', // Frontend na Vercel
@@ -70,9 +78,7 @@ app.use(cors({
     'https://accounts.google.com', // Google OAuth
     'https://apis.google.com', // Google APIs
     'http://192.168.0.13:8080',
-    'http://127.0.0.1:8080',
     // Domínios do Google para OAuth
-    'https://accounts.google.com',
     'https://www.googleapis.com',
     'https://oauth2.googleapis.com'
   ].filter(Boolean),
@@ -115,6 +121,7 @@ app.use('/api/profile', profileRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/profile-config', profileConfigRoutes);
 app.use('/api/test-auth', testAuthRoutes);
+app.use('/api/google-users', googleUsersRoutes);
 
 // Rotas sem prefixo /api (para compatibilidade)
 app.use('/auth', authRoutes);

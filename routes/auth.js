@@ -248,13 +248,14 @@ router.post('/login/google', async (req, res, next) => {
 
     // Buscar ou criar perfil do usuário
     let userProfile = null;
-    const userId = `google_${googleId}`;
+    const { v4: uuidv4 } = require('uuid');
+    const userId = uuidv4(); // Gerar UUID válido
     
     try {
       // Tentar buscar perfil existente pelo Google ID
       console.log('🔍 Buscando perfil existente por Google ID:', googleId);
-      const { data: existingProfile, error: profileError } = await supabase
-        .from('user_profiles')
+      const { data: existingProfile, error: profileError } = await supabaseAdmin
+        .from('google_user_profiles')
         .select('*')
         .eq('google_id', googleId)
         .single();
@@ -263,11 +264,10 @@ router.post('/login/google', async (req, res, next) => {
         console.log('✅ Perfil existente encontrado:', existingProfile.id);
         
         // Atualizar último login
-        const { error: updateError } = await supabase
-          .from('user_profiles')
+        const { error: updateError } = await supabaseAdmin
+          .from('google_user_profiles')
           .update({ 
-            last_login: new Date().toISOString(),
-            avatar_url: avatar // Atualizar avatar caso tenha mudado
+            updated_at: new Date().toISOString()
           })
           .eq('google_id', googleId);
         
@@ -285,18 +285,14 @@ router.post('/login/google', async (req, res, next) => {
         const newProfileData = {
           id: userId,
           email: email,
-          full_name: name || 'Usuário Google',
-          avatar_url: avatar,
-          provider: 'google',
-          google_id: googleId,
-          email_verified: emailVerified || false,
-          last_login: new Date().toISOString()
+          nome: name || 'Usuário Google',
+          google_id: googleId
         };
         
         console.log('🔍 Dados do novo perfil:', newProfileData);
         
-        const { data: newProfile, error: createError } = await supabase
-          .from('user_profiles')
+        const { data: newProfile, error: createError } = await supabaseAdmin
+          .from('google_user_profiles')
           .insert(newProfileData)
           .select()
           .single();
@@ -305,8 +301,8 @@ router.post('/login/google', async (req, res, next) => {
           if (createError.code === '23505') {
             console.warn('⚠️ Perfil já existe (duplicata), tentando buscar novamente...');
             // Tentar buscar novamente
-            const { data: retryProfile } = await supabase
-              .from('user_profiles')
+            const { data: retryProfile } = await supabaseAdmin
+              .from('google_user_profiles')
               .select('*')
               .eq('google_id', googleId)
               .single();
@@ -353,8 +349,7 @@ router.post('/login/google', async (req, res, next) => {
         email: email,
         provider: 'google',
         googleId: googleId,
-        iat: Math.floor(Date.now() / 1000),
-        exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60) // 7 dias
+        iat: Math.floor(Date.now() / 1000)
       };
       
       jwtToken = jwt.sign(jwtPayload, process.env.JWT_SECRET, {
@@ -372,7 +367,7 @@ router.post('/login/google', async (req, res, next) => {
       console.log('✅ Token JWT gerado e validado:', {
         tokenLength: jwtToken.length,
         hasValidFormat: !!sanitizedToken,
-        expiresAt: new Date(jwtPayload.exp * 1000).toISOString()
+        userId: jwtPayload.userId
       });
       
     } catch (error) {
@@ -389,11 +384,11 @@ router.post('/login/google', async (req, res, next) => {
       user: {
         id: userProfile.id,
         email: email,
-        name: userProfile.full_name || name,
+        name: userProfile.nome || name,
         avatar: userProfile.avatar_url || avatar,
         provider: 'google',
         cpf: userProfile.cpf || null,
-        phone: userProfile.phone || null,
+        phone: userProfile.telefone || null,
         hasProfile: true,
         emailVerified: emailVerified
       },
@@ -1622,6 +1617,401 @@ router.get('/utils/localStorage-cleanup.js', (req, res) => {
       error: 'Erro ao servir utilitário de limpeza',
       details: error.message,
       code: 'CLEANUP_UTIL_SERVE_ERROR'
+    });
+  }
+});
+
+/**
+ * POST /auth/login/google-alt
+ * Login com Google (alternativo sem validação de token)
+ */
+router.post('/login/google-alt', async (req, res) => {
+  console.log('🔍 POST /api/auth/login/google-alt - Dados recebidos:', req.body);
+  
+  try {
+    const { google_user, google_token } = req.body;
+    
+    if (!google_user || !google_user.email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Dados do usuário Google são obrigatórios'
+      });
+    }
+    
+    console.log('🔍 Dados do usuário Google:', {
+      email: google_user.email,
+      name: google_user.name,
+      picture: google_user.picture,
+      email_verified: google_user.email_verified
+    });
+    
+    // Verificar se usuário já existe no Supabase
+    const { data: existingUser, error: fetchError } = await supabase
+      .from('user_profiles')
+      .select('*')
+      .eq('email', google_user.email)
+      .single();
+    
+    let user;
+    
+    if (existingUser) {
+      console.log('✅ Usuário existente encontrado:', existingUser.email);
+      user = existingUser;
+      
+      // Atualizar dados se necessário
+      if (google_user.name && google_user.name !== existingUser.full_name) {
+        const { data: updatedUser, error: updateError } = await supabase
+          .from('user_profiles')
+          .update({
+            full_name: google_user.name,
+            avatar_url: google_user.picture || null,
+            last_login: new Date().toISOString()
+          })
+          .eq('id', existingUser.id)
+          .select()
+          .single();
+        
+        if (updateError) {
+          console.error('❌ Erro ao atualizar usuário:', updateError);
+        } else {
+          user = updatedUser;
+          console.log('✅ Dados do usuário atualizados');
+        }
+      }
+    } else {
+      console.log('🆕 Criando novo usuário Google:', google_user.email);
+      
+      // Criar novo usuário
+      const userId = `google_${Date.now()}`;
+      const { data: newUser, error: createError } = await supabase
+        .from('user_profiles')
+        .insert({
+          id: userId,
+          email: google_user.email,
+          full_name: google_user.name || google_user.email.split('@')[0],
+          avatar_url: google_user.picture || null,
+          provider: 'google',
+          google_id: google_user.id || google_user.sub,
+          email_verified: google_user.email_verified || true,
+          last_login: new Date().toISOString()
+        })
+        .select()
+        .single();
+      
+      if (createError) {
+        console.error('❌ Erro ao criar usuário:', createError);
+        return res.status(500).json({
+          success: false,
+          error: 'Erro ao criar usuário no banco de dados'
+        });
+      }
+      
+      user = newUser;
+      console.log('✅ Novo usuário criado:', user.email);
+    }
+    
+    // Gerar JWT token
+    const jwtPayload = {
+      userId: user.id,
+      email: user.email,
+      provider: 'google'
+    };
+    
+    const token = jwt.sign(jwtPayload, process.env.JWT_SECRET, {
+      expiresIn: '7d'
+    });
+    
+    console.log('✅ Login Google alternativo realizado com sucesso para:', user.email);
+    
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.nome,
+        avatar: user.avatar_url,
+        provider: 'google',
+        emailVerified: user.email_verified
+      },
+      token: token,
+      access_token: token,
+      message: 'Login realizado com sucesso'
+    });
+    
+  } catch (error) {
+    console.error('❌ Erro no login Google alternativo:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro interno do servidor no login Google'
+    });
+  }
+});
+
+/**
+ * POST /auth/login/google-direct
+ * Login com Google (dados diretos)
+ */
+router.post('/login/google-direct', async (req, res) => {
+  console.log('🔍 POST /api/auth/login/google-direct - Dados recebidos:', req.body);
+  
+  try {
+    const { email, name, picture, email_verified, sub } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email é obrigatório'
+      });
+    }
+    
+    console.log('🔍 Dados do usuário Google diretos:', {
+      email,
+      name,
+      picture,
+      email_verified,
+      sub
+    });
+    
+    // Verificar se usuário já existe nas tabelas Google
+    const { data: existingUser, error: fetchError } = await supabase
+      .from('google_user_profiles')
+      .select('*')
+      .eq('email', email)
+      .single();
+    
+    let user;
+    
+    if (existingUser) {
+      console.log('✅ Usuário existente encontrado:', existingUser.email);
+      user = existingUser;
+      
+      // Atualizar dados se necessário
+      if (name && name !== existingUser.nome) {
+        const { data: updatedUser, error: updateError } = await supabase
+          .from('google_user_profiles')
+          .update({
+            nome: name,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existingUser.id)
+          .select()
+          .single();
+        
+        if (updateError) {
+          console.error('❌ Erro ao atualizar usuário:', updateError);
+        } else {
+          user = updatedUser;
+          console.log('✅ Dados do usuário atualizados');
+        }
+      }
+    } else {
+      console.log('🆕 Criando novo usuário Google:', email);
+      
+      // Criar novo perfil na tabela google_user_profiles
+      const { data: createdUser, error: createError } = await supabase
+        .from('google_user_profiles')
+        .insert({
+          google_id: sub || req.body.google_id,
+          email: email,
+          nome: name || email.split('@')[0],
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+      
+      if (createError) {
+        console.error('❌ Erro ao criar usuário:', createError);
+        return res.status(500).json({ success: false, error: 'Erro ao criar usuário no banco de dados' });
+      }
+      
+      user = createdUser;
+      console.log('✅ Novo usuário criado:', user.email);
+    }
+    
+    // Gerar JWT token
+    const jwtPayload = {
+      userId: user.id,
+      email: user.email,
+      provider: 'google'
+    };
+    
+    const token = jwt.sign(jwtPayload, process.env.JWT_SECRET, {
+      expiresIn: '7d'
+    });
+    
+    console.log('✅ Login Google direto realizado com sucesso para:', user.email);
+    
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.nome,
+        provider: 'google',
+        isGoogleUser: true
+      },
+      token: token,
+      access_token: token,
+      message: 'Login realizado com sucesso'
+    });
+    
+  } catch (error) {
+    console.error('❌ Erro no login Google direto:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro interno do servidor no login Google'
+    });
+  }
+});
+
+/**
+ * POST /auth/login/google-separated
+ * Login Google usando tabelas separadas (google_user_profiles)
+ */
+router.post('/login/google-separated', async (req, res) => {
+  console.log('🔍 POST /api/auth/login/google-separated - Dados recebidos:', req.body);
+  
+  try {
+    const { email, name, picture, email_verified, sub } = req.body;
+    
+    if (!email || !sub) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email e Google ID são obrigatórios'
+      });
+    }
+    
+    console.log('🔍 Dados do usuário Google:', {
+      email,
+      name,
+      picture,
+      email_verified,
+      sub
+    });
+    
+    // Verificar se usuário já existe na tabela google_user_profiles
+    const { data: existingUser, error: fetchError } = await supabaseAdmin
+      .from('google_user_profiles')
+      .select('*')
+      .eq('google_id', sub)
+      .single();
+    
+    let user;
+    
+    if (existingUser) {
+      console.log('✅ Usuário Google existente encontrado:', existingUser.email);
+      user = existingUser;
+      
+      // Atualizar dados se necessário
+      const updateData = {};
+      if (name && name !== existingUser.nome) {
+        updateData.nome = name;
+      }
+      if (email && email !== existingUser.email) {
+        updateData.email = email;
+      }
+      
+      if (Object.keys(updateData).length > 0) {
+        const { data: updatedUser, error: updateError } = await supabaseAdmin
+          .from('google_user_profiles')
+          .update(updateData)
+          .eq('id', existingUser.id)
+          .select()
+          .single();
+        
+        if (updateError) {
+          console.error('❌ Erro ao atualizar usuário Google:', updateError);
+        } else {
+          user = updatedUser;
+          console.log('✅ Dados do usuário Google atualizados');
+        }
+      }
+    } else {
+      console.log('🆕 Criando novo usuário Google:', email);
+      
+      // Verificar se já existe usuário com este email
+      const { data: existingByEmail } = await supabaseAdmin
+        .from('google_user_profiles')
+        .select('*')
+        .eq('email', email)
+        .single();
+      
+      if (existingByEmail) {
+        // Atualizar com o google_id se o usuário existe mas não tem google_id
+        const { data: updatedUser, error: updateError } = await supabaseAdmin
+          .from('google_user_profiles')
+          .update({
+            google_id: sub,
+            nome: name || existingByEmail.nome
+          })
+          .eq('id', existingByEmail.id)
+          .select()
+          .single();
+        
+        if (updateError) {
+          console.error('❌ Erro ao atualizar usuário existente com Google ID:', updateError);
+          return res.status(500).json({ success: false, error: 'Erro ao vincular conta Google' });
+        }
+        
+        user = updatedUser;
+        console.log('✅ Usuário existente vinculado ao Google');
+      } else {
+        // Criar novo usuário na tabela google_user_profiles
+        const { data: createdUser, error: createError } = await supabaseAdmin
+          .from('google_user_profiles')
+          .insert({
+            google_id: sub,
+            email: email,
+            nome: name || email.split('@')[0]
+          })
+          .select()
+          .single();
+        
+        if (createError) {
+          console.error('❌ Erro ao criar usuário Google:', createError);
+          return res.status(500).json({ success: false, error: 'Erro ao criar usuário Google no banco de dados' });
+        }
+        
+        user = createdUser;
+        console.log('✅ Novo usuário Google criado:', user.email);
+      }
+    }
+    
+    // Gerar JWT token específico para usuários Google
+    const jwtPayload = {
+      googleUserId: user.id,
+      googleId: user.google_id,
+      email: user.email,
+      provider: 'google-separated'
+    };
+    
+    const token = jwt.sign(jwtPayload, process.env.JWT_SECRET, {
+      expiresIn: '7d'
+    });
+    
+    console.log('✅ Login Google separado realizado com sucesso para:', user.email);
+    
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        google_id: user.google_id,
+        email: user.email,
+        name: user.nome,
+        provider: 'google-separated',
+        emailVerified: true
+      },
+      token: token,
+      access_token: token,
+      message: 'Login Google realizado com sucesso'
+    });
+    
+  } catch (error) {
+    console.error('❌ Erro no login Google separado:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro interno do servidor no login Google'
     });
   }
 });

@@ -567,4 +567,256 @@ router.get('/token-stats', (req, res) => {
   }
 });
 
+// Endpoint para debug de tokens do Google
+router.post('/google-token', async (req, res) => {
+  try {
+    const { token } = req.body;
+    const { verifyGoogleToken } = require('../utils/google-auth');
+    
+    console.log('🔍 Debug Google Token - Iniciando análise');
+    
+    if (!token) {
+      return res.status(400).json({
+        error: 'Token é obrigatório',
+        code: 'MISSING_TOKEN'
+      });
+    }
+    
+    // Informações básicas do token
+    const tokenInfo = {
+      length: token.length,
+      starts_with: token.substring(0, 20),
+      ends_with: token.substring(token.length - 20),
+      has_dots: (token.match(/\./g) || []).length,
+      is_jwt_format: token.split('.').length === 3
+    };
+    
+    console.log('🔍 Token Info:', tokenInfo);
+    
+    // Tentar decodificar o header do JWT sem verificar
+    let jwtHeader = null;
+    let jwtPayload = null;
+    
+    try {
+      const parts = token.split('.');
+      if (parts.length === 3) {
+        jwtHeader = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
+        jwtPayload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+        
+        console.log('🔍 JWT Header:', jwtHeader);
+        console.log('🔍 JWT Payload (parcial):', {
+          iss: jwtPayload.iss,
+          aud: jwtPayload.aud,
+          iat: jwtPayload.iat,
+          exp: jwtPayload.exp,
+          nbf: jwtPayload.nbf,
+          email: jwtPayload.email
+        });
+        
+        // Verificar timestamps
+        const now = Math.floor(Date.now() / 1000);
+        const timingInfo = {
+          current_time: now,
+          issued_at: jwtPayload.iat,
+          not_before: jwtPayload.nbf,
+          expires_at: jwtPayload.exp,
+          time_diff_iat: now - jwtPayload.iat,
+          time_diff_nbf: now - (jwtPayload.nbf || jwtPayload.iat),
+          time_until_exp: jwtPayload.exp - now
+        };
+        
+        console.log('🔍 Timing Info:', timingInfo);
+      }
+    } catch (decodeError) {
+      console.log('❌ Erro ao decodificar JWT:', decodeError.message);
+    }
+    
+    // Tentar verificar com Google
+    let googleResult = null;
+    let googleError = null;
+    
+    try {
+      googleResult = await verifyGoogleToken(token);
+      console.log('✅ Token Google válido');
+    } catch (error) {
+      googleError = {
+        message: error.message,
+        stack: error.stack
+      };
+      console.log('❌ Erro na verificação Google:', error.message);
+    }
+    
+    res.json({
+      success: !googleError,
+      token_info: tokenInfo,
+      jwt_header: jwtHeader,
+      jwt_payload_partial: jwtPayload ? {
+        iss: jwtPayload.iss,
+        aud: jwtPayload.aud,
+        iat: jwtPayload.iat,
+        exp: jwtPayload.exp,
+        nbf: jwtPayload.nbf,
+        email: jwtPayload.email
+      } : null,
+      timing_info: jwtPayload ? {
+        current_time: Math.floor(Date.now() / 1000),
+        issued_at: jwtPayload.iat,
+        not_before: jwtPayload.nbf,
+        expires_at: jwtPayload.exp,
+        time_diff_iat: Math.floor(Date.now() / 1000) - jwtPayload.iat,
+        time_diff_nbf: Math.floor(Date.now() / 1000) - (jwtPayload.nbf || jwtPayload.iat),
+        time_until_exp: jwtPayload.exp - Math.floor(Date.now() / 1000)
+      } : null,
+      google_verification: {
+        success: !!googleResult,
+        error: googleError,
+        result: googleResult ? {
+          email: googleResult.email,
+          name: googleResult.name,
+          sub: googleResult.sub
+        } : null
+      },
+      environment: {
+        google_client_id_configured: !!process.env.GOOGLE_CLIENT_ID,
+        node_env: process.env.NODE_ENV,
+        server_time: new Date().toISOString()
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Erro no debug do token Google:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro interno do servidor',
+      details: error.message
+    });
+  }
+});
+
+// Endpoint para debug de tokens do Google
+router.post('/google-token', async (req, res) => {
+  try {
+    const { token } = req.body;
+    const { verifyGoogleToken } = require('../utils/google-auth');
+    
+    console.log('🔍 Debug Google Token - Iniciando análise');
+    
+    if (!token) {
+      return res.status(400).json({
+        error: 'Token é obrigatório',
+        code: 'MISSING_TOKEN'
+      });
+    }
+    
+    // Informações básicas do token
+    const tokenInfo = {
+      length: token.length,
+      starts_with: token.substring(0, 20),
+      ends_with: token.substring(token.length - 20),
+      has_dots: (token.match(/\./g) || []).length,
+      is_jwt_format: token.split('.').length === 3
+    };
+    
+    console.log('🔍 Token Info:', tokenInfo);
+    
+    // Tentar decodificar o header do JWT sem verificar
+    let jwtHeader = null;
+    let jwtPayload = null;
+    
+    try {
+      const parts = token.split('.');
+      if (parts.length === 3) {
+        jwtHeader = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
+        jwtPayload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+        
+        console.log('🔍 JWT Header:', jwtHeader);
+        console.log('🔍 JWT Payload (parcial):', {
+          iss: jwtPayload.iss,
+          aud: jwtPayload.aud,
+          iat: jwtPayload.iat,
+          exp: jwtPayload.exp,
+          nbf: jwtPayload.nbf,
+          email: jwtPayload.email
+        });
+        
+        // Verificar timestamps
+        const now = Math.floor(Date.now() / 1000);
+        const timingInfo = {
+          current_time: now,
+          issued_at: jwtPayload.iat,
+          not_before: jwtPayload.nbf,
+          expires_at: jwtPayload.exp,
+          time_diff_iat: now - jwtPayload.iat,
+          time_diff_nbf: now - (jwtPayload.nbf || jwtPayload.iat),
+          time_until_exp: jwtPayload.exp - now
+        };
+        
+        console.log('🔍 Timing Info:', timingInfo);
+      }
+    } catch (decodeError) {
+      console.log('❌ Erro ao decodificar JWT:', decodeError.message);
+    }
+    
+    // Tentar verificar com Google
+    let googleResult = null;
+    let googleError = null;
+    
+    try {
+      googleResult = await verifyGoogleToken(token);
+      console.log('✅ Token Google válido');
+    } catch (error) {
+      googleError = {
+        message: error.message,
+        stack: error.stack
+      };
+      console.log('❌ Erro na verificação Google:', error.message);
+    }
+    
+    res.json({
+      success: !googleError,
+      token_info: tokenInfo,
+      jwt_header: jwtHeader,
+      jwt_payload_partial: jwtPayload ? {
+        iss: jwtPayload.iss,
+        aud: jwtPayload.aud,
+        iat: jwtPayload.iat,
+        exp: jwtPayload.exp,
+        nbf: jwtPayload.nbf,
+        email: jwtPayload.email
+      } : null,
+      timing_info: jwtPayload ? {
+        current_time: Math.floor(Date.now() / 1000),
+        issued_at: jwtPayload.iat,
+        not_before: jwtPayload.nbf,
+        expires_at: jwtPayload.exp,
+        time_diff_iat: Math.floor(Date.now() / 1000) - jwtPayload.iat,
+        time_diff_nbf: Math.floor(Date.now() / 1000) - (jwtPayload.nbf || jwtPayload.iat),
+        time_until_exp: jwtPayload.exp - Math.floor(Date.now() / 1000)
+      } : null,
+      google_verification: {
+        success: !!googleResult,
+        error: googleError,
+        result: googleResult ? {
+          email: googleResult.email,
+          name: googleResult.name,
+          sub: googleResult.sub
+        } : null
+      },
+      environment: {
+        google_client_id_configured: !!process.env.GOOGLE_CLIENT_ID,
+        node_env: process.env.NODE_ENV,
+        server_time: new Date().toISOString()
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Erro no debug do token Google:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro interno do servidor',
+      details: error.message
+    });
+  }
+});
+
 module.exports = router;

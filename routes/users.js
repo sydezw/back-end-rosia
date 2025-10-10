@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authenticateUser } = require('../middleware/auth');
+const { authenticateUser, authenticateToken } = require('../middleware/auth');
 const UsersController = require('../controllers/UsersController');
 const multer = require('multer');
 const path = require('path');
@@ -22,21 +22,21 @@ const upload = multer({
   }
 });
 
-// Middleware de autenticação para todas as rotas (usando Supabase auth)
-router.use(authenticateUser);
+// Rotas de perfil com autenticação Supabase
+router.get('/profile', authenticateUser, UsersController.getProfile);
+router.put('/profile', authenticateUser, UsersController.updateProfile);
 
-// Rotas de perfil
-router.get('/profile', UsersController.getProfile);
-router.put('/profile', UsersController.updateProfile);
+// ✅ CORREÇÃO: Rota profile-update usando autenticação JWT customizada (compatível com frontend)
+router.put('/profile-update', authenticateToken, UsersController.updateProfileComplete);
 
 // Rota de upload de avatar
-router.post('/avatar', upload.single('avatar'), UsersController.uploadAvatar);
+router.post('/avatar', authenticateUser, upload.single('avatar'), UsersController.uploadAvatar);
 
 // Rotas de endereços
-router.get('/addresses', UsersController.getAddresses);
-router.post('/addresses', UsersController.createAddress);
-router.put('/addresses/:id', UsersController.updateAddress);
-router.patch('/addresses/:id/default', UsersController.setDefaultAddress);
-router.delete('/addresses/:id', UsersController.deleteAddress);
+router.get('/addresses', authenticateUser, UsersController.getAddresses);
+router.post('/addresses', authenticateUser, UsersController.createAddress);
+router.put('/addresses/:id', authenticateUser, UsersController.updateAddress);
+router.patch('/addresses/:id/default', authenticateUser, UsersController.setDefaultAddress);
+router.delete('/addresses/:id', authenticateUser, UsersController.deleteAddress);
 
 module.exports = router;

@@ -2,7 +2,7 @@ const { supabase } = require('../config/supabase');
 const jwt = require('jsonwebtoken');
 const { findUserById } = require('../db/user-queries');
 const { checkIfTokenInvalidated } = require('../utils/tokenManager');
-const { validateJWTToken, sanitizeToken, getTokenDebugInfo } = require('../utils/token-validation');
+const { validateJWTFormat, sanitizeToken, getTokenDebugInfo } = require('../utils/token-validation');
 
 /**
  * Middleware para autenticar usuário usando JWT personalizado com validação robusta
@@ -11,17 +11,24 @@ const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   let token = authHeader && authHeader.split(' ')[1];
 
-  // Log para debug
+  // ✅ LOGS DE DEBUG MELHORADOS
   console.log('🔐 Auth Debug - Headers:', {
     authorization: req.headers.authorization ? 'Present' : 'Missing',
     userAgent: req.headers['user-agent'],
-    origin: req.headers.origin
+    origin: req.headers.origin,
+    contentType: req.headers['content-type']
   });
   console.log('🔐 Auth Debug - Token:', {
     provided: !!token,
     length: token?.length,
     preview: token ? `${token.substring(0, 20)}...` : 'N/A',
-    isUndefined: token === 'undefined'
+    isUndefined: token === 'undefined',
+    isNull: token === null,
+    isEmpty: token === ''
+  });
+  console.log('🔐 Auth Debug - JWT_SECRET:', {
+    configured: !!process.env.JWT_SECRET,
+    length: process.env.JWT_SECRET?.length || 0
   });
 
   if (!token) {
@@ -63,7 +70,7 @@ const authenticateToken = async (req, res, next) => {
   token = sanitizedToken;
 
   // Validação completa do token JWT
-  const tokenValidation = validateJWTToken(token);
+  const tokenValidation = validateJWTFormat(token);
   if (!tokenValidation.isValid) {
     console.error('❌ Token JWT com formato inválido:', tokenValidation);
     return res.status(401).json({
@@ -99,7 +106,8 @@ const authenticateToken = async (req, res, next) => {
       userId: decoded.userId, 
       email: decoded.email,
       exp: decoded.exp ? new Date(decoded.exp * 1000).toISOString() : 'não definido',
-      iat: decoded.iat ? new Date(decoded.iat * 1000).toISOString() : 'não definido'
+      iat: decoded.iat ? new Date(decoded.iat * 1000).toISOString() : 'não definido',
+      timeUntilExpiry: decoded.exp ? Math.floor((decoded.exp * 1000 - Date.now()) / 1000) + 's' : 'N/A'
     });
     
     const user = await findUserById(decoded.userId);
@@ -161,7 +169,15 @@ const authenticateUser = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     
+    console.log('🔐 Supabase Auth Debug - Headers:', {
+      authorization: authHeader ? 'Present' : 'Missing',
+      userAgent: req.headers['user-agent'],
+      origin: req.headers.origin,
+      contentType: req.headers['content-type']
+    });
+    
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.log('❌ Supabase Auth: Token de acesso ausente ou formato inválido');
       return res.status(401).json({ 
         error: 'Token de acesso requerido',
         code: 'MISSING_TOKEN'
@@ -169,16 +185,34 @@ const authenticateUser = async (req, res, next) => {
     }
 
     const token = authHeader.substring(7); // Remove 'Bearer '
+    
+    console.log('🔐 Supabase Auth Debug - Token:', {
+      provided: !!token,
+      length: token?.length,
+      preview: token ? `${token.substring(0, 20)}...` : 'N/A'
+    });
 
     // Verificar token com Supabase
+    console.log('🔍 Verificando token com Supabase...');
     const { data: { user }, error } = await supabase.auth.getUser(token);
 
     if (error || !user) {
+      console.log('❌ Supabase Auth Error:', {
+        error: error?.message || 'Usuário não encontrado',
+        user: !!user,
+        tokenPreview: token ? `${token.substring(0, 20)}...` : 'N/A'
+      });
       return res.status(401).json({ 
         error: 'Token inválido ou expirado',
         code: 'INVALID_TOKEN'
       });
     }
+    
+    console.log('✅ Supabase Auth Success:', {
+      userId: user.id,
+      email: user.email,
+      role: user.role
+    });
 
     // Adicionar usuário ao request
     req.user = user;
@@ -345,10 +379,129 @@ const checkAdminStatus = async (req, res, next) => {
   }
 };
 
+/**
+ * Middleware para autenticar usuários Google usando tabelas separadas
+ */
+const authenticateGoogleUser = async (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  let token = authHeader && authHeader.split(' ')[1];
+
+  console.log('🔐 Google Auth - Validando JWT local:', {
+    hasHeader: !!authHeader,
+    hasToken: !!token,
+    tokenLength: token?.length
+  });
+
+  if (!token) {
+    console.log('❌ Google Auth Error: Token não fornecido');
+    return res.status(401).json({ 
+      success: false, 
+      message: 'Token de acesso requerido para usuários Google',
+      code: 'MISSING_GOOGLE_TOKEN'
+    });
+  }
+
+  try {
+    console.log('🔍 Validando JWT local gerado pelo backend...');
+    
+    // Validar JWT local (gerado pelo backend)
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
+    console.log('✅ JWT local válido:', {
+      googleId: decoded.googleId,
+      email: decoded.email,
+      exp: new Date(decoded.exp * 1000).toISOString()
+    });
+    
+    // Buscar dados do perfil na tabela google_user_profiles usando google_id
+    const { data: profileData, error: profileError } = await supabase
+      .from('google_user_profiles')
+      .select('*')
+      .eq('google_id', decoded.googleId)
+      .single();
+
+    if (profileError || !profileData) {
+      console.log('❌ Perfil Google não encontrado:', {
+        googleId: decoded.googleId,
+        error: profileError?.message
+      });
+      return res.status(404).json({
+        success: false,
+        message: 'Perfil Google não encontrado',
+        code: 'GOOGLE_PROFILE_NOT_FOUND'
+      });
+    }
+
+    // Buscar endereço do usuário (se existir)
+    const { data: addressData, error: addressError } = await supabase
+      .from('google_user_addresses')
+      .select('*')
+      .eq('google_user_id', profileData.id)
+      .single();
+
+    // Preparar dados do usuário com perfil e endereço
+    const userData = {
+      id: profileData.id,
+      google_id: profileData.google_id,
+      email: profileData.email,
+      nome: profileData.nome,
+      telefone: profileData.telefone,
+      cpf: profileData.cpf,
+      data_nascimento: profileData.data_nascimento,
+      created_at: profileData.created_at,
+      updated_at: profileData.updated_at,
+      isGoogleUser: true,
+      address: null
+    };
+
+    // Adicionar endereço se existir
+    if (!addressError && addressData) {
+      userData.address = {
+        id: addressData.id,
+        logradouro: addressData.logradouro,
+        numero: addressData.numero,
+        bairro: addressData.bairro,
+        cidade: addressData.cidade,
+        estado: addressData.estado,
+        cep: addressData.cep,
+        complemento: addressData.complemento,
+        created_at: addressData.created_at,
+        updated_at: addressData.updated_at
+      };
+    }
+    
+    console.log('✅ Dados do usuário Google carregados:', {
+      id: userData.id,
+      email: userData.email,
+      hasAddress: !!userData.address
+    });
+    
+    // Adicionar dados completos do usuário à requisição
+    req.user = userData;
+    
+    next();
+    
+  } catch (jwtError) {
+    console.log('❌ JWT local inválido:', {
+      error: jwtError.message,
+      name: jwtError.name
+    });
+    
+    return res.status(401).json({
+      success: false,
+      message: 'Token inválido para usuários Google',
+      code: 'INVALID_GOOGLE_TOKEN',
+      debug: { error: jwtError.message },
+      action: 'REDIRECT_TO_LOGIN'
+    });
+  }
+};
+
 module.exports = {
   authenticateToken,
   authenticateUser,
   optionalAuth,
   authenticateAdmin,
-  checkAdminStatus
+  checkAdminStatus,
+  authenticateGoogleUser
 };

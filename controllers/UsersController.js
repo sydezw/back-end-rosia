@@ -1,4 +1,4 @@
-const { supabase } = require('../config/supabase');
+const { supabase, supabaseAdmin } = require('../config/supabase');
 const { storage } = require('../config/storage');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
@@ -65,7 +65,7 @@ class UsersController {
       const { data: userProfile, error } = await supabase
         .from('user_profiles')
         .select('*')
-        .eq('id', userId)
+        .eq('user_id', userId)
         .single();
       
       if (error) {
@@ -122,17 +122,17 @@ class UsersController {
       
       // Normalizar campos (aceitar tanto formato antigo quanto novo)
       const normalizedData = {
-        full_name: full_name || nome,
-        cpf: cpf,
-        phone: phone || telefone,
-        birth_date: birth_date || data_nascimento,
-        gender: gender
+        nome: (nome || full_name)?.trim(),
+        cpf: cpf?.replace(/[^\d]/g, ''),
+        telefone: (telefone || phone)?.replace(/[^\d]/g, ''),
+        data_nascimento: birth_date || data_nascimento,
+        gender: gender?.trim()
       };
       
       // Validações
       const errors = {};
       
-      if (!normalizedData.full_name || normalizedData.full_name.trim().length < 2) {
+      if (!normalizedData.nome || normalizedData.nome.length < 2) {
         errors.nome = ['Nome é obrigatório e deve ter pelo menos 2 caracteres'];
       }
       
@@ -140,11 +140,11 @@ class UsersController {
         errors.cpf = ['CPF inválido'];
       }
       
-      if (normalizedData.phone && !validatePhone(normalizedData.phone)) {
+      if (normalizedData.telefone && !validatePhone(normalizedData.telefone)) {
         errors.telefone = ['Telefone inválido'];
       }
       
-      if (normalizedData.birth_date && isNaN(Date.parse(normalizedData.birth_date))) {
+      if (normalizedData.data_nascimento && isNaN(Date.parse(normalizedData.data_nascimento))) {
         errors.data_nascimento = ['Data de nascimento inválida'];
       }
       
@@ -161,7 +161,7 @@ class UsersController {
       
       // Verificar se CPF já está em uso por outro usuário
       if (normalizedData.cpf) {
-        const { data: existingUser } = await supabase
+        const { data: existingUser } = await supabaseAdmin
           .from('user_profiles')
           .select('id')
           .eq('cpf', normalizedData.cpf)
@@ -187,37 +187,37 @@ class UsersController {
         updated_at: new Date().toISOString()
       };
       
-      if (normalizedData.full_name) updateData.full_name = normalizedData.full_name.trim();
+      if (normalizedData.nome) updateData.nome = normalizedData.nome;
       if (normalizedData.cpf) updateData.cpf = normalizedData.cpf;
-      if (normalizedData.phone) updateData.phone = normalizedData.phone;
-      if (normalizedData.birth_date) updateData.birth_date = normalizedData.birth_date;
+      if (normalizedData.telefone) updateData.telefone = normalizedData.telefone;
+      if (normalizedData.data_nascimento) updateData.data_nascimento = normalizedData.data_nascimento;
       if (normalizedData.gender) updateData.gender = normalizedData.gender;
       
       console.log('📝 Dados para atualização:', updateData);
       
       // Verificar se o perfil já existe
-      const { data: existingProfile } = await supabase
+      const { data: existingProfile } = await supabaseAdmin
         .from('user_profiles')
-        .select('id')
-        .eq('id', userId)
+        .select('user_id')
+        .eq('user_id', userId)
         .single();
       
       let result;
       if (existingProfile) {
         // Atualizar perfil existente
         console.log('🔄 Atualizando perfil existente');
-        result = await supabase
+        result = await supabaseAdmin
           .from('user_profiles')
           .update(updateData)
-          .eq('id', userId)
+          .eq('user_id', userId)
           .select()
           .single();
       } else {
         // Criar novo perfil
         console.log('📝 Criando novo perfil');
-        result = await supabase
+        result = await supabaseAdmin
           .from('user_profiles')
-          .insert({ ...updateData, id: userId, email: req.user.email })
+          .insert({ ...updateData, user_id: userId, email: req.user.email })
           .select()
           .single();
       }
@@ -694,6 +694,403 @@ class UsersController {
       res.json(formatResponse(true, null, 'Endereço excluído com sucesso'));
     } catch (error) {
       console.error('Erro ao excluir endereço:', error);
+      res.status(500).json(
+        formatResponse(false, null, null, {
+          code: 'INTERNAL_ERROR',
+          message: 'Erro interno do servidor'
+        })
+      );
+    }
+  }
+
+  // PUT /api/users/profile-update - Novo endpoint seguro para atualizar perfil completo
+  static async updateProfileComplete(req, res) {
+    try {
+      const userId = req.user.id;
+      const provider = req.provider || 'email'; // Detectar se é usuário Google
+      const isGoogleUser = provider === 'google';
+      
+      const {
+        // Dados do perfil (user_profiles ou google_user_profiles)
+        nome,
+        full_name,
+        cpf,
+        telefone,
+        phone,
+        data_nascimento,
+        birth_date,
+        // Dados do endereço (user_addresses ou google_user_addresses)
+        nome_endereco,
+        cep,
+        logradouro,
+        numero,
+        bairro,
+        cidade,
+        estado,
+        complemento
+      } = req.body;
+      
+      console.log('🔄 Atualizando perfil completo do usuário:', userId, {
+        provider,
+        isGoogleUser,
+        profile: { nome: nome || full_name, cpf, telefone: telefone || phone, data_nascimento: data_nascimento || birth_date },
+        address: { nome_endereco, cep, logradouro, numero, bairro, cidade, estado, complemento }
+      });
+      
+      const errors = {};
+      let profileUpdated = false;
+      let addressUpdated = false;
+      
+      // ===== ATUALIZAÇÃO DO PERFIL =====
+      if (nome || full_name || cpf || telefone || phone || data_nascimento || birth_date) {
+        const normalizedProfileData = {
+          nome: (full_name || nome)?.trim(),
+          cpf: cpf?.replace(/[^\d]/g, ''),
+          telefone: (phone || telefone)?.replace(/[^\d]/g, ''),
+          data_nascimento: birth_date || data_nascimento
+        };
+        
+        // Validações do perfil
+        if (normalizedProfileData.nome && normalizedProfileData.nome.length < 2) {
+          errors.nome = ['Nome deve ter pelo menos 2 caracteres'];
+        }
+        
+        if (normalizedProfileData.cpf && !validateCPF(normalizedProfileData.cpf)) {
+          console.log('❌ CPF inválido:', { cpf: normalizedProfileData.cpf, length: normalizedProfileData.cpf.length });
+          errors.cpf = ['CPF inválido'];
+        } else if (normalizedProfileData.cpf) {
+          console.log('✅ CPF válido:', normalizedProfileData.cpf);
+        }
+        
+        if (normalizedProfileData.telefone && !validatePhone(normalizedProfileData.telefone)) {
+          errors.telefone = ['Telefone inválido (deve ter 10 ou 11 dígitos)'];
+        }
+        
+        if (normalizedProfileData.data_nascimento && isNaN(Date.parse(normalizedProfileData.data_nascimento))) {
+          errors.data_nascimento = ['Data de nascimento inválida'];
+        }
+        
+        // Verificar se CPF já está em uso por outro usuário
+        if (normalizedProfileData.cpf) {
+          const profileTable = isGoogleUser ? 'google_user_profiles' : 'user_profiles';
+          const { data: existingUser } = await supabaseAdmin
+            .from(profileTable)
+            .select('id')
+            .eq('cpf', normalizedProfileData.cpf)
+            .neq('id', userId)
+            .single();
+          
+          if (existingUser) {
+            errors.cpf = ['CPF já está em uso por outro usuário'];
+          }
+        }
+        
+        if (Object.keys(errors).length === 0) {
+          // Preparar dados para atualização do perfil
+          const profileUpdateData = {
+            updated_at: new Date().toISOString()
+          };
+          
+          if (normalizedProfileData.nome) profileUpdateData.nome = normalizedProfileData.nome;
+          if (normalizedProfileData.cpf) profileUpdateData.cpf = normalizedProfileData.cpf;
+          if (normalizedProfileData.telefone) profileUpdateData.telefone = normalizedProfileData.telefone;
+          if (normalizedProfileData.data_nascimento) profileUpdateData.data_nascimento = normalizedProfileData.data_nascimento;
+          
+          if (isGoogleUser) {
+            // Para usuários Google, usar google_user_profiles
+            console.log('🔄 Fazendo upsert do perfil Google para userId:', userId);
+            
+            // Buscar o perfil Google existente pelo google_id ou email
+            const { data: existingGoogleProfile } = await supabaseAdmin
+              .from('google_user_profiles')
+              .select('id')
+              .or(`google_id.eq.${userId},email.eq.${req.user.email}`)
+              .single();
+            
+            if (existingGoogleProfile) {
+              // Atualizar perfil existente
+              const { error: profileError } = await supabaseAdmin
+                .from('google_user_profiles')
+                .update(profileUpdateData)
+                .eq('id', existingGoogleProfile.id);
+              
+              if (profileError) {
+                console.error('❌ Erro ao atualizar perfil Google:', profileError);
+                errors.profile = ['Erro ao atualizar dados do perfil'];
+              } else {
+                profileUpdated = true;
+                console.log('✅ Perfil Google atualizado com sucesso');
+              }
+            } else {
+              // Criar novo perfil Google
+              const { error: profileError } = await supabaseAdmin
+                .from('google_user_profiles')
+                .insert({
+                  ...profileUpdateData,
+                  google_id: userId,
+                  email: req.user.email,
+                  created_at: new Date().toISOString()
+                });
+              
+              if (profileError) {
+                console.error('❌ Erro ao criar perfil Google:', profileError);
+                errors.profile = ['Erro ao criar dados do perfil'];
+              } else {
+                profileUpdated = true;
+                console.log('✅ Perfil Google criado com sucesso');
+              }
+            }
+          } else {
+            // Para usuários normais, usar user_profiles
+            console.log('🔄 Fazendo upsert do perfil para userId:', userId);
+            const { error: profileError } = await supabaseAdmin
+               .from('user_profiles')
+               .upsert({ ...profileUpdateData, id: userId, user_id: userId, email: req.user.email }, {
+                 onConflict: 'id'
+               });
+          
+            if (profileError) {
+              console.error('❌ Erro ao fazer upsert do perfil:', profileError);
+              errors.profile = ['Erro ao atualizar dados do perfil'];
+            } else {
+              profileUpdated = true;
+              console.log('✅ Perfil atualizado/criado com sucesso via upsert');
+            }
+          }
+        }
+      }
+      
+      // ===== ATUALIZAÇÃO DO ENDEREÇO =====
+      if (nome_endereco || cep || logradouro || numero || bairro || cidade || estado) {
+        // Validações do endereço
+        if (!cep || !validateCEP(cep)) {
+          errors.cep = ['CEP inválido (deve ter 8 dígitos)'];
+        }
+        
+        if (!logradouro?.trim()) {
+          errors.logradouro = ['Logradouro é obrigatório'];
+        }
+        
+        if (!numero?.trim()) {
+          errors.numero = ['Número é obrigatório'];
+        }
+        
+        if (!bairro?.trim()) {
+          errors.bairro = ['Bairro é obrigatório'];
+        }
+        
+        if (!cidade?.trim()) {
+          errors.cidade = ['Cidade é obrigatória'];
+        }
+        
+        if (!estado?.trim()) {
+          errors.estado = ['Estado é obrigatório'];
+        }
+        
+        if (Object.keys(errors).length === 0) {
+          if (isGoogleUser) {
+            // Para usuários Google, usar google_user_addresses
+            console.log('🔄 Processando endereço Google para userId:', userId);
+            
+            // Buscar o perfil Google para obter o google_user_id
+            const { data: googleProfile } = await supabaseAdmin
+              .from('google_user_profiles')
+              .select('id')
+              .or(`google_id.eq.${userId},email.eq.${req.user.email}`)
+              .single();
+            
+            if (!googleProfile) {
+              errors.endereco = ['Perfil Google não encontrado. Atualize o perfil primeiro.'];
+            } else {
+              const addressData = {
+                google_user_id: googleProfile.id,
+                cep: cep.replace(/[^\d]/g, ''),
+                logradouro: logradouro.trim(),
+                numero: numero.trim(),
+                bairro: bairro.trim(),
+                cidade: cidade.trim(),
+                estado: estado.trim(),
+                complemento: complemento?.trim() || null,
+                updated_at: new Date().toISOString()
+              };
+              
+              // Verificar se já existe um endereço para este usuário Google
+              const { data: existingAddress } = await supabaseAdmin
+                .from('google_user_addresses')
+                .select('id')
+                .eq('google_user_id', googleProfile.id)
+                .single();
+              
+              if (existingAddress) {
+                // Atualizar endereço existente
+                const { error: addressError } = await supabaseAdmin
+                  .from('google_user_addresses')
+                  .update(addressData)
+                  .eq('id', existingAddress.id);
+                
+                if (addressError) {
+                  console.error('❌ Erro ao atualizar endereço Google:', addressError);
+                  errors.endereco = ['Erro ao atualizar dados do endereço'];
+                } else {
+                  addressUpdated = true;
+                  console.log('✅ Endereço Google atualizado com sucesso');
+                }
+              } else {
+                // Criar novo endereço
+                const { error: addressError } = await supabaseAdmin
+                  .from('google_user_addresses')
+                  .insert({
+                    ...addressData,
+                    created_at: new Date().toISOString()
+                  });
+                
+                if (addressError) {
+                  console.error('❌ Erro ao criar endereço Google:', addressError);
+                  errors.endereco = ['Erro ao criar dados do endereço'];
+                } else {
+                  addressUpdated = true;
+                  console.log('✅ Endereço Google criado com sucesso');
+                }
+              }
+            }
+          } else {
+            // Para usuários normais, usar user_addresses
+            const addressData = {
+              user_id: userId,
+              name: nome_endereco?.trim() || 'Endereço Principal',
+              cep: cep.replace(/[^\d]/g, ''),
+              logradouro: logradouro.trim(),
+              numero: numero.trim(),
+              bairro: bairro.trim(),
+              cidade: cidade.trim(),
+              estado: estado.trim(),
+              complemento: complemento?.trim() || null,
+              is_default: true,
+              updated_at: new Date().toISOString()
+            };
+            
+            // Verificar se já existe um endereço padrão para este usuário
+            const { data: existingAddress } = await supabaseAdmin
+              .from('user_addresses')
+              .select('id')
+              .eq('user_id', userId)
+              .eq('is_default', true)
+              .single();
+            
+            if (existingAddress) {
+              // Atualizar endereço existente
+              const { error: addressError } = await supabaseAdmin
+                .from('user_addresses')
+                .update(addressData)
+                .eq('id', existingAddress.id);
+              
+              if (addressError) {
+                console.error('❌ Erro ao atualizar endereço:', addressError);
+                errors.endereco = ['Erro ao atualizar dados do endereço'];
+              } else {
+                addressUpdated = true;
+                console.log('✅ Endereço atualizado com sucesso');
+              }
+            } else {
+              // Criar novo endereço
+              const { error: addressError } = await supabaseAdmin
+                .from('user_addresses')
+                .insert(addressData);
+              
+              if (addressError) {
+                console.error('❌ Erro ao criar endereço:', addressError);
+                errors.endereco = ['Erro ao criar dados do endereço'];
+              } else {
+                addressUpdated = true;
+                console.log('✅ Endereço criado com sucesso');
+              }
+            }
+          }
+        }
+      }
+      
+      // Verificar se houve erros
+      if (Object.keys(errors).length > 0) {
+        console.log('❌ Erros de validação:', errors);
+        return res.status(400).json(
+          formatResponse(false, null, null, {
+            code: 'VALIDATION_ERROR',
+            message: 'Dados inválidos',
+            details: errors
+          })
+        );
+      }
+      
+      // Verificar se pelo menos algo foi atualizado
+      if (!profileUpdated && !addressUpdated) {
+        return res.status(400).json(
+          formatResponse(false, null, null, {
+            code: 'NO_DATA',
+            message: 'Nenhum dado foi fornecido para atualização'
+          })
+        );
+      }
+      
+      // Buscar dados atualizados para retornar
+      let updatedProfile = null;
+      let updatedAddress = null;
+      
+      if (isGoogleUser) {
+        // Para usuários Google, buscar nas tabelas específicas
+        const { data: googleProfile } = await supabaseAdmin
+          .from('google_user_profiles')
+          .select('*')
+          .or(`google_id.eq.${userId},email.eq.${req.user.email}`)
+          .single();
+        
+        updatedProfile = googleProfile;
+        
+        if (googleProfile) {
+          const { data: googleAddress } = await supabaseAdmin
+            .from('google_user_addresses')
+            .select('*')
+            .eq('google_user_id', googleProfile.id)
+            .single();
+          
+          updatedAddress = googleAddress;
+        }
+      } else {
+        // Para usuários normais, buscar nas tabelas padrão
+        const { data: profile } = await supabaseAdmin
+          .from('user_profiles')
+          .select('*')
+          .eq('user_id', userId)
+          .single();
+        
+        updatedProfile = profile;
+        
+        const { data: address } = await supabaseAdmin
+          .from('user_addresses')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('is_default', true)
+          .single();
+        
+        updatedAddress = address;
+      }
+      
+      const responseMessage = [];
+      if (profileUpdated) responseMessage.push('perfil');
+      if (addressUpdated) responseMessage.push('endereço');
+      
+      console.log('✅ Atualização completa realizada com sucesso');
+      
+      res.json(formatResponse(true, {
+        user: updatedProfile,
+        address: updatedAddress,
+        updated: {
+          profile: profileUpdated,
+          address: addressUpdated
+        }
+      }, `Dados atualizados com sucesso: ${responseMessage.join(' e ')}`));
+      
+    } catch (error) {
+      console.error('❌ Erro ao atualizar perfil completo:', error);
       res.status(500).json(
         formatResponse(false, null, null, {
           code: 'INTERNAL_ERROR',

@@ -98,18 +98,70 @@ const findUserByGoogleId = async (googleId) => {
 };
 
 /**
- * Busca usuário por ID
+ * Busca usuário por ID (verifica ambas as tabelas: user_profiles e google_user_profiles)
  * @param {number} userId - ID do usuário
  * @returns {Promise<Object|null>} Usuário encontrado ou null
  */
 const findUserById = async (userId) => {
-  const { data, error } = await supabase
+  console.log('🔍 findUserById - Procurando usuário:', userId);
+  
+  // Primeiro, tentar na tabela user_profiles (usuários normais)
+  const { data: normalUser, error: normalError } = await supabaseAdmin
     .from('user_profiles')
+    .select('*')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (normalUser) {
+    console.log('🔍 findUserById - Usuário normal encontrado:', userId);
+    return { ...normalUser, userType: 'normal' };
+  }
+  
+  // Se não encontrou, tentar na tabela google_user_profiles (usuários Google)
+  const { data: googleUser, error: googleError } = await supabaseAdmin
+    .from('google_user_profiles')
+    .select('*')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (googleUser) {
+    console.log('🔍 findUserById - Usuário Google encontrado:', userId);
+    return { ...googleUser, userType: 'google' };
+  }
+  
+  console.log('🔍 findUserById - Usuário não encontrado em nenhuma tabela:', userId);
+  
+  if (normalError && normalError.code !== 'PGRST116') {
+    console.error('❌ findUserById - Erro na tabela user_profiles:', normalError);
+  }
+  if (googleError && googleError.code !== 'PGRST116') {
+    console.error('❌ findUserById - Erro na tabela google_user_profiles:', googleError);
+  }
+  
+  return null;
+};
+
+/**
+ * Busca usuário Google por ID
+ * @param {number} userId - ID do usuário Google
+ * @returns {Promise<Object|null>} Usuário Google encontrado ou null
+ */
+const findGoogleUserById = async (userId) => {
+  console.log('🔍 findGoogleUserById - Procurando usuário Google:', userId);
+  
+  const { data, error } = await supabaseAdmin
+    .from('google_user_profiles')
     .select('*')
     .eq('id', userId)
     .single();
 
-  if (error && error.code !== 'PGRST116') throw error;
+  console.log('🔍 findGoogleUserById - Resultado:', { data: !!data, error: error?.message, userId });
+  
+  if (error && error.code !== 'PGRST116') {
+    console.error('❌ findGoogleUserById - Erro:', error);
+    throw error;
+  }
+  
   return data;
 };
 
@@ -133,5 +185,6 @@ module.exports = {
   findUserByEmail,
   findUserByGoogleId,
   findUserById,
+  findGoogleUserById,
   updateLastLogin
 };
