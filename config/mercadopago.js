@@ -1,4 +1,6 @@
-const { MercadoPagoConfig, Payment, CardToken } = require('mercadopago');
+const { MercadoPagoConfig, Payment, CardToken, Preference } = require('mercadopago');
+const axios = require('axios');
+const { v4: uuidv4 } = require('uuid');
 
 /**
  * Configuração do Mercado Pago
@@ -27,6 +29,7 @@ class MercadoPagoService {
     // Inicializar serviços
     this.payment = new Payment(this.client);
     this.cardToken = new CardToken(this.client);
+    this.preference = new Preference(this.client);
   }
 
   /**
@@ -82,7 +85,7 @@ class MercadoPagoService {
           last_name: paymentData.payer.last_name
         },
         external_reference: paymentData.external_reference,
-        notification_url: `${process.env.BACKEND_URL || 'http://localhost:3001'}/webhook/payment`,
+        notification_url: `${process.env.BACKEND_URL || 'https://back-end-rosia02.vercel.app'}/webhook/payment`,
         metadata: {
           order_id: paymentData.order_id
         }
@@ -106,6 +109,22 @@ class MercadoPagoService {
     } catch (error) {
       console.error('Erro ao criar pagamento:', error);
       throw error;
+    }
+  }
+
+  async createOrder(orderData, idempotencyKey) {
+    try {
+      const url = 'https://api.mercadopago.com/v1/orders';
+      const headers = {
+        Authorization: `Bearer ${this.accessToken}`,
+        'Content-Type': 'application/json',
+        'X-Idempotency-Key': idempotencyKey || uuidv4()
+      };
+      const { data } = await axios.post(url, orderData, { headers, timeout: 15000 });
+      return data;
+    } catch (error) {
+      const payload = error?.response?.data || { message: error.message };
+      throw new Error(JSON.stringify(payload));
     }
   }
 
@@ -145,18 +164,29 @@ class MercadoPagoService {
    */
   async getPaymentMethods() {
     try {
-      // Esta funcionalidade pode ser implementada conforme necessário
-      // Por enquanto, retornamos os métodos mais comuns
-      return [
-        { id: 'visa', name: 'Visa', type: 'credit_card' },
-        { id: 'master', name: 'Mastercard', type: 'credit_card' },
-        { id: 'amex', name: 'American Express', type: 'credit_card' },
-        { id: 'elo', name: 'Elo', type: 'credit_card' },
-        { id: 'hipercard', name: 'Hipercard', type: 'credit_card' }
-      ];
+      const url = 'https://api.mercadopago.com/v1/payment_methods';
+      const { data } = await axios.get(url, {
+        headers: {
+          Authorization: `Bearer ${this.accessToken}`
+        },
+        timeout: 8000
+      });
+
+      // Normalizar resposta para formato simples usado pelo frontend
+      return (Array.isArray(data) ? data : []).map((pm) => ({
+        id: pm.id,
+        name: pm.name,
+        type: pm.payment_type_id, // ex: credit_card, ticket, account_money
+        status: pm.status,
+        accreditation_time: pm.accreditation_time
+      }));
     } catch (error) {
-      console.error('Erro ao obter métodos de pagamento:', error);
-      throw error;
+      console.error('Erro ao obter métodos de pagamento do Mercado Pago:', error?.response?.data || error.message);
+      // Fallback mínimo para evitar quebrar o frontend em caso de erro
+      return [
+        { id: 'visa', name: 'Visa', type: 'credit_card', status: 'active' },
+        { id: 'master', name: 'Mastercard', type: 'credit_card', status: 'active' }
+      ];
     }
   }
 
@@ -174,6 +204,16 @@ class MercadoPagoService {
    */
   getPublicKey() {
     return this.publicKey;
+  }
+  
+  async createPreference(preferenceBody) {
+    try {
+      const response = await this.preference.create({ body: preferenceBody });
+      return response;
+    } catch (error) {
+      console.error('Erro ao criar preferência:', error);
+      throw error;
+    }
   }
 }
 
