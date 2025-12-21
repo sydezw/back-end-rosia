@@ -3,7 +3,7 @@
 Este guia documenta os novos endpoints de carrinho e checkout para usuários autenticados via Google e explica como integrá-los no frontend.
 
 ## Base
-- Backend: `http://localhost:3030`
+- Backend: `https://back-end-rosia02.vercel.app`
 - Auth: `Authorization: Bearer <token_google>`
 - Todas as rotas em `/api/cart` e `/api/order` requerem token Google válido.
 
@@ -142,7 +142,7 @@ Erros:
 A seguir exemplos com `fetch`. Garanta que o token Google esteja salvo (ex.: `localStorage.setItem('googleToken', token)`):
 
 ```ts
-const BASE_URL = 'http://localhost:3030';
+const BASE_URL = 'https://back-end-rosia02.vercel.app';
 const getHeaders = () => ({
   'Content-Type': 'application/json',
   Authorization: `Bearer ${localStorage.getItem('googleToken') || ''}`,
@@ -214,14 +214,14 @@ export async function checkout(shipping_address: any, payment_method = 'pix') {
 ### Testes rápidos
 PowerShell (sem token → 401):
 ```
-Invoke-WebRequest -UseBasicParsing -Uri http://localhost:3030/api/cart
+Invoke-WebRequest -UseBasicParsing -Uri https://back-end-rosia02.vercel.app/api/cart
 ```
 Com token:
 ```
-Invoke-WebRequest -UseBasicParsing -Uri http://localhost:3030/api/cart -Headers @{ Authorization = "Bearer <token>" }
+Invoke-WebRequest -UseBasicParsing -Uri https://back-end-rosia02.vercel.app/api/cart -Headers @{ Authorization = "Bearer <token>" }
 ```
 
 ## Dicas de Debug
 - 401: verifique se o header `Authorization: Bearer <token>` está presente.
 - 500: consulte logs do backend para detalhes (Supabase/joins).
-- Confirme que o backend está rodando na porta `3030` e que o `.env` tem `PORT=3030`.
+- Confirme que o backend está acessível em `https://back-end-rosia02.vercel.app`.

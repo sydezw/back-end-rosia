@@ -73,8 +73,8 @@ async function testarDadosPessoais() {
   
   try {
     const options = {
-      hostname: 'localhost',
-      port: 3030,
+      protocol: 'https:',
+      hostname: 'back-end-rosia02.vercel.app',
       path: '/api/google-users/personal-data',
       method: 'PUT',
       headers: {
@@ -111,8 +111,8 @@ async function testarEndereco() {
   
   try {
     const options = {
-      hostname: 'localhost',
-      port: 3030,
+      protocol: 'https:',
+      hostname: 'back-end-rosia02.vercel.app',
       path: '/api/google-users/address',
       method: 'PUT',
       headers: {
@@ -148,8 +148,8 @@ async function testarSemToken() {
   
   try {
     const options = {
-      hostname: 'localhost',
-      port: 3030,
+      protocol: 'https:',
+      hostname: 'back-end-rosia02.vercel.app',
       path: '/api/google-users/personal-data',
       method: 'PUT',
       headers: {
@@ -191,8 +191,8 @@ async function testarCamposObrigatorios() {
   
   try {
     const options = {
-      hostname: 'localhost',
-      port: 3030,
+      protocol: 'https:',
+      hostname: 'back-end-rosia02.vercel.app',
       path: '/api/google-users/personal-data',
       method: 'PUT',
       headers: {
@@ -221,14 +221,14 @@ async function testarCamposObrigatorios() {
 
 // Função para verificar se o servidor está rodando
 async function verificarServidor() {
-  console.log('🔍 VERIFICANDO SE O SERVIDOR ESTÁ RODANDO...');
+  console.log('🔍 VERIFICANDO SE O BACKEND EM PRODUÇÃO ESTÁ RESPONDENDO...');
   
   try {
     const options = {
-      hostname: 'localhost',
-      port: 3030,
-      path: '/api/google-users/debug-token',
-      method: 'POST',
+      protocol: 'https:',
+      hostname: 'back-end-rosia02.vercel.app',
+      path: '/api/health',
+      method: 'GET',
       headers: {
         'Content-Type': 'application/json'
       }
@@ -236,13 +236,13 @@ async function verificarServidor() {
     
     const response = await makeRequest(options);
     
-    if (response.statusCode) {
-      console.log('✅ SERVIDOR ESTÁ RODANDO na porta 3030');
+    if (response.statusCode === 200) {
+      console.log('✅ BACKEND EM PRODUÇÃO ESTÁ RESPONDENDO');
       return true;
     }
   } catch (error) {
-    console.log('❌ SERVIDOR NÃO ESTÁ RODANDO na porta 3030');
-    console.log('💡 Execute: npm start');
+    console.log('❌ BACKEND NÃO RESPONDEU');
+    console.log('💡 Verifique URL: https://back-end-rosia02.vercel.app');
     return false;
   }
 }

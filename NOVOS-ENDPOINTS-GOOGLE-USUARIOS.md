@@ -290,7 +290,7 @@ atualizarEndereco(endereco)
 ## 📝 Notas Importantes
 
 - ⚠️ **Token JWT obrigatório**: Todos os endpoints requerem autenticação
-- ⚠️ **CORS configurado**: Backend aceita requisições do frontend na porta 3030
+- ⚠️ **CORS configurado**: Backend acessível em `https://back-end-rosia02.vercel.app`
 - ⚠️ **Validação de CPF**: Sistema impede CPF duplicado
 - ⚠️ **Endereço único**: Cada usuário Google pode ter apenas um endereço
 - ⚠️ **Campos obrigatórios**: Todos os campos listados como obrigatórios devem ser enviados

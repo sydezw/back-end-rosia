@@ -1,9 +1,9 @@
 /**
  * Teste automatizado da rota /api/auth/login/google-separated
- * Valida contrato e fluxo de perfil utilizando servidor local na porta 3030.
+ * Valida contrato e fluxo de perfil utilizando servidor em produção (Vercel).
  */
 
-const BASE_URL = process.env.TEST_BASE_URL || 'http://localhost:3030';
+const BASE_URL = process.env.TEST_BASE_URL || 'https://back-end-rosia02.vercel.app';
 
 async function run() {
   const now = Date.now();

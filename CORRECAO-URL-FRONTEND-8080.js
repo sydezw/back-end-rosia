@@ -8,7 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 
-console.log('🔧 CORREÇÃO: URL do Frontend (8080 → 3030)');
+console.log('🔧 CORREÇÃO: URL do Frontend (8080 → produção)');
 console.log('=' .repeat(50));
 
 // Função para corrigir URLs em arquivos

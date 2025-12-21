@@ -2,7 +2,7 @@
 
 ## ❌ Problema Identificado
 
-O frontend está tentando acessar o backend na porta **8080**, mas o servidor está rodando na porta **3030**.
+O frontend está tentando acessar o backend na porta **8080**, mas o servidor está acessível em **https://back-end-rosia02.vercel.app**.
 
 **Erro no console:**
 ```
@@ -83,11 +83,10 @@ curl -X PUT https://back-end-rosia02.vercel.app/api/google-users/address `
   -d '{"cep":"12345-678","logradouro":"Rua Teste","numero":"123","bairro":"Centro","cidade":"São Paulo","estado":"SP"}'
 ```
 
-### 2. Verificar se o Servidor Está Rodando
+### 2. Verificar se o Backend Está Acessível
 
 ```bash
-# Verificar processos na porta 3030
-netstat -ano | findstr :3030
+curl https://back-end-rosia02.vercel.app/api/health
 ```
 
 ### 3. Logs do Backend
@@ -128,7 +127,7 @@ export const API_BASE_URL = getApiUrl();
 
 ## ✅ Checklist de Verificação
 
-- [ ] Backend rodando na porta 3030
+- [ ] Backend acessível em https://back-end-rosia02.vercel.app
 - [ ] Frontend configurado para usar https://back-end-rosia02.vercel.app
 - [ ] Variáveis de ambiente atualizadas
 - [ ] Interceptador usando URL correta

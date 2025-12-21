@@ -129,7 +129,7 @@ window.aplicarCorrecaoImediata = async function() {
     console.error('❌ Erro na correção:', error);
     
     if (error.message.includes('fetch')) {
-      console.log('💡 Dica: Verifique se o servidor backend está rodando na porta 3030');
+      console.log('💡 Dica: Verifique se o backend está acessível em https://back-end-rosia02.vercel.app');
     }
   }
 };

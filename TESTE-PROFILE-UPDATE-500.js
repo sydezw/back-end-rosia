@@ -74,7 +74,7 @@ async function testarProfileUpdate() {
     console.log('\n🏥 Testando saúde do servidor...');
     try {
       const healthResponse = await axios.get(`${BASE_URL}/api/health`);
-      console.log('✅ OK: Servidor respondendo na porta 3030');
+      console.log('✅ OK: Servidor respondendo em produção');
     } catch (error) {
       console.log('❌ ERRO: Servidor não está respondendo:', error.message);
     }

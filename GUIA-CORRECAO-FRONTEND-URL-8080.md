@@ -1,4 +1,4 @@
-# 🔧 CORREÇÃO URGENTE: URLs do Frontend (8080 → 3030)
+# 🔧 CORREÇÃO URGENTE: URLs do Frontend (8080 → produção)
 
 ## 🚨 **PROBLEMA IDENTIFICADO**
 
@@ -138,7 +138,7 @@ PUT https://back-end-rosia02.vercel.app/api/users/profile-update
 - Abra as **DevTools** (F12)
 - Vá na aba **Network**
 - Faça uma ação que chame a API
-- Verifique se as requisições vão para `:3030`
+- Verifique se as requisições vão para `https://back-end-rosia02.vercel.app`
 
 ## 🎯 **RESULTADO ESPERADO**
 
