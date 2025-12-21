@@ -21,8 +21,7 @@ class MercadoPagoService {
     this.client = new MercadoPagoConfig({
       accessToken: this.accessToken,
       options: {
-        timeout: 5000,
-        idempotencyKey: 'rosita-floral-elegance'
+        timeout: 5000
       }
     });
 
@@ -66,7 +65,7 @@ class MercadoPagoService {
    * @param {Object} paymentData - Dados do pagamento
    * @returns {Promise<Object>} Resposta do pagamento
    */
-  async createPayment(paymentData) {
+  async createPayment(paymentData, idempotencyKey) {
     try {
       const payment = {
         transaction_amount: paymentData.transaction_amount,
@@ -104,7 +103,7 @@ class MercadoPagoService {
         };
       }
 
-      const response = await this.payment.create({ body: payment });
+      const response = await this.payment.create({ body: payment }, { idempotencyKey });
       return response;
     } catch (error) {
       console.error('Erro ao criar pagamento:', error);

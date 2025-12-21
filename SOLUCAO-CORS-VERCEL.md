@@ -28,7 +28,7 @@ NODE_ENV=production
 JWT_SECRET=seu_jwt_secret_super_seguro_de_pelo_menos_32_caracteres
 
 # FRONTEND (OBRIGATÓRIO)
-FRONTEND_URL=http://192.168.0.13:8080
+FRONTEND_URL=https://www.rosia.com.br
 ```
 
 **⚠️ IMPORTANTE:** Marque todas as opções:
@@ -55,7 +55,7 @@ curl https://back-end-rosia.vercel.app/health
 
 # Teste CORS
 curl -X OPTIONS https://back-end-rosia.vercel.app/admin/products \
-  -H "Origin: http://192.168.0.13:8080" \
+  -H "Origin: https://www.rosia.com.br" \
   -H "Access-Control-Request-Method: POST" \
   -H "Access-Control-Request-Headers: Content-Type,Authorization"
 ```
@@ -79,10 +79,8 @@ node server.js
 ## 🔧 Configuração de CORS Atual
 
 O backend já está configurado para aceitar:
-- `http://192.168.0.13:8080`
+- `https://www.rosia.com.br`
 - `http://localhost:3000`
-- `http://localhost:8080`
-- `http://127.0.0.1:8080`
 
 ## 📋 Checklist de Resolução
 

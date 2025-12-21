@@ -25,12 +25,12 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 **Teste Realizado:**
 ```bash
 OPTIONS https://back-end-rosia.vercel.app/admin/products
-Origin: http://192.168.0.13:8080
+Origin: https://www.rosia.com.br
 ```
 
 **Resultado:**
 - ✅ Status: 200 OK
-- ✅ Access-Control-Allow-Origin: `http://192.168.0.13:8080`
+- ✅ Access-Control-Allow-Origin: `https://www.rosia.com.br`
 - ✅ Access-Control-Allow-Methods: `GET,POST,PUT,DELETE,OPTIONS`
 - ✅ Access-Control-Allow-Headers: `Content-Type,Authorization,X-Requested-With`
 
@@ -42,9 +42,7 @@ app.use(cors({
   origin: [
     process.env.FRONTEND_URL, 
     'http://localhost:3000', 
-    'http://localhost:8080',
-    'http://192.168.0.13:8080',  // ✅ SEU FRONTEND
-    'http://127.0.0.1:8080'
+    'https://www.rosia.com.br'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],

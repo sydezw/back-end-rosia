@@ -312,6 +312,6 @@ const AdminLogin = () => {
 - O token expira em 24 horas
 - Não há necessidade de senha, apenas email
 - O sistema verifica se o admin está ativo
-- CORS está configurado para `localhost:8080`
+- CORS está configurado para `https://www.rosia.com.br`
 - Use HTTPS em produção
 

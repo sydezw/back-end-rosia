@@ -91,6 +91,20 @@ router.post('/payment', async (req, res, next) => {
   }
 });
 
+router.post('/mercadopago', async (req, res) => {
+  try {
+    const payload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    const { type, data } = payload || {};
+    if (type === 'payment' && data && data.id) {
+      return await handleMercadoPagoWebhook(payload, res);
+    }
+    return res.sendStatus(200);
+  } catch (err) {
+    console.error('Erro webhook MP:', err);
+    return res.sendStatus(500);
+  }
+});
+
 /**
  * POST /webhook/shipping
  * Recebe atualizações de status de envio

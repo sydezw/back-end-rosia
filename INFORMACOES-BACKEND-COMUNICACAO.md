@@ -145,10 +145,9 @@ O backend deve aceitar requisições dos seguintes domínios:
 // Configuração CORS necessária
 const corsOptions = {
   origin: [
-    'http://localhost:8080',           // Desenvolvimento Vite
-    'http://localhost:3000',           // Desenvolvimento React
-    'http://localhost:5173',           // Desenvolvimento Vite alternativo
-    'https://seu-frontend.vercel.app'  // Produção (substituir pela URL real)
+    'https://www.rosia.com.br',
+    'http://localhost:3000',
+    'http://localhost:5173'
   ],
   credentials: false,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],

@@ -1,6 +1,6 @@
 const express = require('express');
 const GoogleUsersController = require('../controllers/GoogleUsersController');
-const { authenticateGoogleUser } = require('../middleware/auth');
+const { authenticateSupabaseGoogleUser } = require('../middleware/auth');
 const { supabase } = require('../config/supabase');
 
 const router = express.Router();
@@ -43,7 +43,7 @@ router.get('/debug-token', async (req, res) => {
 });
 
 // Middleware de autenticação específico para usuários Google
-router.use(authenticateGoogleUser);
+router.use(authenticateSupabaseGoogleUser);
 
 // GET /api/google-users/profile - Buscar perfil do usuário Google autenticado
 router.get('/profile', GoogleUsersController.getProfile);

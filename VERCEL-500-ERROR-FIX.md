@@ -55,9 +55,7 @@ app.use(cors({
     'https://rosia.com.br', // ✅ NOVO
     'https://rosialoja-front-rosialastcommit.vercel.app', // ✅ NOVO
     'https://back-end-rosia02.vercel.app',
-    'https://nsazbeovtmmetpiyokqc.supabase.co',
-    'http://192.168.0.13:8080',
-    'http://127.0.0.1:8080'
+    'https://nsazbeovtmmetpiyokqc.supabase.co'
   ].filter(Boolean),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -132,29 +130,29 @@ app.use((req, res, next) => {
 3. Verificar se popup abre corretamente
 4. Verificar se não há erros de CORS no console
 
-## Correção CORS - localhost:8080
+## Correção CORS - www.rosia.com.br
 
 **Data:** 2025-01-09  
 **Commit:** 8addf23
 
 ### Problema
-- Frontend rodando em `http://localhost:8080` estava sendo bloqueado por política CORS
-- Erro: "Access to fetch at 'https://back-end-rosia02.vercel.app/api/auth/login/google' from origin 'http://localhost:8080' has been blocked by CORS policy"
+- Frontend rodando em `https://www.rosia.com.br` estava sendo bloqueado por política CORS
+- Erro: "Access to fetch at 'https://back-end-rosia02.vercel.app/api/auth/login/google' from origin 'https://www.rosia.com.br' has been blocked by CORS policy"
 
 ### Solução
-- Adicionado `'http://localhost:8080'` às origens CORS permitidas no `server.js`
+- Adicionado `'https://www.rosia.com.br'` às origens CORS permitidas no `server.js`
 - Localização: linha 59 do arquivo `server.js`
 
 ### Teste de Verificação
 ```bash
-Invoke-WebRequest -Uri "https://back-end-rosia02.vercel.app/health" -Method GET -Headers @{"Origin"="http://localhost:8080"} -UseBasicParsing
+Invoke-WebRequest -Uri "https://back-end-rosia02.vercel.app/health" -Method GET -Headers @{"Origin"="https://www.rosia.com.br"} -UseBasicParsing
 ```
 
-**Resultado:** ✅ Header `Access-Control-Allow-Origin: http://localhost:8080` presente na resposta
+**Resultado:** ✅ Header `Access-Control-Allow-Origin: https://www.rosia.com.br` presente na resposta
 
 ## 🔍 Próximos Passos
 
-1. **Configurar Google OAuth Console** para aceitar localhost:8080 como origem autorizada
+1. **Configurar Google OAuth Console** para aceitar https://www.rosia.com.br como origem autorizada
 2. **Monitorar logs do Vercel** para confirmar que não há mais erros FUNCTION_INVOCATION_FAILED
 3. **Testar todas as rotas** para garantir funcionamento correto
 4. **Verificar performance** após a correção

@@ -353,53 +353,76 @@ router.get('/cart', authenticateToken, async (req, res, next) => {
 router.post('/cart', authenticateToken, async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { product_id, quantity = 1, size, color } = req.body;
+    const { product_variant_id, quantity = 1 } = req.body;
 
-    if (!product_id) {
+    if (!product_variant_id) {
       return res.status(400).json({
-        error: 'product_id é obrigatório'
+        error: 'product_variant_id é obrigatório'
       });
     }
 
-    // Buscar dados do produto
-    const { data: product, error: productError } = await supabase
-      .from('products')
-      .select('id, name, price, stock, status')
-      .eq('id', product_id)
-      .eq('status', 'active')
-      .single();
-
-    if (productError || !product) {
-      return res.status(404).json({
-        error: 'Produto não encontrado ou inativo'
-      });
+    // Validar UUID
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(product_variant_id)) {
+      return res.status(400).json({ error: 'ID da variant inválido' });
     }
 
-    // Verificar estoque
-    if (product.stock < quantity) {
-      return res.status(400).json({
-        error: 'Quantidade solicitada maior que o estoque disponível'
-      });
+    // Buscar dados da variant
+    const { data: variant, error: variantError } = await supabase
+      .from('product_variants')
+      .select('id, product_id, price, discounted_price, has_discount, stock, size, color')
+      .eq('id', product_variant_id)
+      .maybeSingle();
+
+    if (variantError || !variant) {
+      return res.status(404).json({ error: 'Variant não encontrada' });
     }
 
-    // Verificar se item já existe no carrinho
+
+
+    // Verificar estoque da variant
+    if (variant.stock < quantity) {
+      return res.status(400).json({ error: 'Quantidade solicitada maior que o estoque disponível da variant' });
+    }
+
+    // Obter ou criar carrinho do usuário
+    const { data: existingCart } = await supabase
+      .from('carts')
+      .select('id')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    let cartId = existingCart?.id;
+    if (!cartId) {
+      const { data: newCart, error: cartCreateError } = await supabase
+        .from('carts')
+        .insert({ user_id: userId })
+        .select('id')
+        .single();
+      if (cartCreateError || !newCart) {
+        console.error('[profile/cart] Erro ao criar carrinho', cartCreateError);
+        return res.status(500).json({ error: 'Erro ao preparar carrinho do usuário' });
+      }
+      cartId = newCart.id;
+    }
+
+    // Preço no momento da compra
+    const priceAtPurchase = variant.has_discount ? (variant.discounted_price ?? variant.price) : variant.price;
+
+    // Verificar se item (variant) já existe no carrinho
     const { data: existingItem } = await supabase
       .from('cart_items')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('product_id', product_id)
-      .eq('size', size || '')
-      .eq('color', color || '')
-      .single();
+      .select('id, quantity')
+      .eq('cart_id', cartId)
+      .eq('product_variant_id', product_variant_id)
+      .maybeSingle();
 
     let result;
     if (existingItem) {
       // Atualizar quantidade
       const newQuantity = existingItem.quantity + quantity;
-      if (newQuantity > product.stock) {
-        return res.status(400).json({
-          error: 'Quantidade total excede o estoque disponível'
-        });
+      if (newQuantity > variant.stock) {
+        return res.status(400).json({ error: 'Quantidade total excede o estoque disponível da variant' });
       }
 
       result = await supabase
@@ -412,32 +435,27 @@ router.post('/cart', authenticateToken, async (req, res, next) => {
         .select()
         .single();
     } else {
-      // Criar novo item
       result = await supabase
         .from('cart_items')
         .insert({
-          user_id: userId,
-          product_id,
+          cart_id: cartId,
+          product_id: variant.product_id,
+          product_variant_id,
           quantity,
-          size,
-          color,
-          unit_price: product.price
+          price: priceAtPurchase,
+          size: variant.size,
+          color: variant.color
         })
         .select()
         .single();
     }
 
     if (result.error) {
-      console.error('Erro ao adicionar ao carrinho:', result.error);
-      return res.status(500).json({
-        error: 'Erro ao adicionar item ao carrinho'
-      });
+      console.error('Erro ao adicionar item (variant) ao carrinho:', result.error);
+      return res.status(500).json({ error: 'Erro ao adicionar item ao carrinho' });
     }
 
-    res.status(201).json({
-      success: true,
-      cart_item: result.data
-    });
+    res.status(201).json({ success: true, cart_item: result.data });
   } catch (error) {
     next(error);
   }

@@ -1915,7 +1915,31 @@ router.post('/login/google-separated', async (req, res) => {
   
   try {
     const { email, name, picture, email_verified, sub } = req.body;
-    
+    const GOOGLE_SEPARATED_CONTRACT_VERSION = '1.0.0';
+
+    // Blindagem: garantir presença de segredo e validar tipos antes de qualquer operação
+    if (!process.env.JWT_SECRET) {
+      return res.status(500).json({
+        success: false,
+        error: 'Configuração ausente: JWT_SECRET'
+      });
+    }
+
+    const errors = [];
+    if (typeof email !== 'string' || !email.includes('@')) errors.push('email inválido');
+    if (typeof sub !== 'string' || sub.length < 8) errors.push('google_id inválido');
+    if (name && typeof name !== 'string') errors.push('name inválido');
+    if (picture && typeof picture !== 'string') errors.push('picture inválido');
+    if (typeof email_verified !== 'undefined' && typeof email_verified !== 'boolean') errors.push('email_verified inválido');
+
+    if (errors.length) {
+      return res.status(400).json({
+        success: false,
+        error: 'Dados inválidos',
+        details: errors
+      });
+    }
+
     if (!email || !sub) {
       return res.status(400).json({
         success: false,
@@ -2045,7 +2069,8 @@ router.post('/login/google-separated', async (req, res) => {
       },
       token: token,
       access_token: token,
-      message: 'Login Google realizado com sucesso'
+      message: 'Login Google realizado com sucesso',
+      meta: { contractVersion: GOOGLE_SEPARATED_CONTRACT_VERSION }
     });
     
   } catch (error) {
@@ -2055,6 +2080,34 @@ router.post('/login/google-separated', async (req, res) => {
       error: 'Erro interno do servidor no login Google'
     });
   }
+});
+
+/**
+ * GET /auth/debug/google-separated-contract
+ * Retorna o contrato da rota google-separated para validação
+ */
+router.get('/debug/google-separated-contract', (req, res) => {
+  res.json({
+    route: '/api/auth/login/google-separated',
+    version: '1.0.0',
+    requiredFields: ['email', 'sub'],
+    optionalFields: ['name', 'picture', 'email_verified'],
+    response: {
+      success: 'boolean',
+      user: {
+        id: 'string',
+        google_id: 'string',
+        email: 'string',
+        name: 'string',
+        provider: 'google-separated',
+        emailVerified: 'boolean'
+      },
+      token: 'string',
+      access_token: 'string',
+      message: 'string',
+      meta: { contractVersion: '1.0.0' }
+    }
+  });
 });
 
 module.exports = router;

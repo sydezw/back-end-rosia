@@ -1,4 +1,4 @@
-const { supabase } = require('../config/supabase');
+const { supabase, supabaseAdmin } = require('../config/supabase')
 const jwt = require('jsonwebtoken');
 const { findUserById } = require('../db/user-queries');
 const { checkIfTokenInvalidated } = require('../utils/tokenManager');
@@ -8,6 +8,7 @@ const { validateJWTFormat, sanitizeToken, getTokenDebugInfo } = require('../util
  * Middleware para autenticar usuário usando JWT personalizado com validação robusta
  */
 const authenticateToken = async (req, res, next) => {
+  if (req.method === 'OPTIONS') return next();
   const authHeader = req.headers['authorization'];
   let token = authHeader && authHeader.split(' ')[1];
 
@@ -163,13 +164,13 @@ const authenticateToken = async (req, res, next) => {
 };
 
 /**
- * Middleware para autenticar usuário usando JWT do Supabase (mantido para compatibilidade)
+ * Middleware para autenticar usuário aceitando JWT local e token do Supabase
  */
 const authenticateUser = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     
-    console.log('🔐 Supabase Auth Debug - Headers:', {
+    console.log('🔐 Auth Debug - Headers:', {
       authorization: authHeader ? 'Present' : 'Missing',
       userAgent: req.headers['user-agent'],
       origin: req.headers.origin,
@@ -177,23 +178,42 @@ const authenticateUser = async (req, res, next) => {
     });
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.log('❌ Supabase Auth: Token de acesso ausente ou formato inválido');
+      console.log('❌ Auth: Token de acesso ausente ou formato inválido');
       return res.status(401).json({ 
         error: 'Token de acesso requerido',
         code: 'MISSING_TOKEN'
       });
     }
 
-    const token = authHeader.substring(7); // Remove 'Bearer '
+    const token = authHeader.substring(7);
     
-    console.log('🔐 Supabase Auth Debug - Token:', {
+    console.log('🔐 Auth Debug - Token:', {
       provided: !!token,
       length: token?.length,
       preview: token ? `${token.substring(0, 20)}...` : 'N/A'
     });
 
-    // Verificar token com Supabase
-    console.log('🔍 Verificando token com Supabase...');
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      if (!decoded || !decoded.userId || !decoded.email) {
+        throw new Error('Payload inválido');
+      }
+      const user = await findUserById(decoded.userId);
+      if (!user) {
+        return res.status(401).json({ 
+          success: false, 
+          message: 'Usuário não encontrado',
+          code: 'USER_NOT_FOUND'
+        });
+      }
+      req.user = user;
+      req.userId = user.id;
+      req.provider = 'local-jwt';
+      return next();
+    } catch (jwtErr) {
+      
+    }
+
     const { data: { user }, error } = await supabase.auth.getUser(token);
 
     if (error || !user) {
@@ -208,17 +228,12 @@ const authenticateUser = async (req, res, next) => {
       });
     }
     
-    console.log('✅ Supabase Auth Success:', {
-      userId: user.id,
-      email: user.email,
-      role: user.role
-    });
-
-    // Adicionar usuário ao request
     req.user = user;
     req.userId = user.id;
+    req.provider = 'supabase';
     
     next();
+    
   } catch (error) {
     console.error('Erro na autenticação:', error);
     return res.status(500).json({ 
@@ -478,7 +493,8 @@ const authenticateGoogleUser = async (req, res, next) => {
     
     // Adicionar dados completos do usuário à requisição
     req.user = userData;
-    
+    req.userId = userData.id;
+
     next();
     
   } catch (jwtError) {
@@ -497,12 +513,92 @@ const authenticateGoogleUser = async (req, res, next) => {
   }
 };
 
+// Novo middleware: autenticação via token do Supabase (admin) e perfil Google
+const authenticateSupabaseGoogleUser = async (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+  if (!token) {
+    return res.status(401).json({ success: false, message: 'Token ausente', code: 'MISSING_TOKEN' });
+  }
+
+  try {
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+    if (error || !user) {
+      return res.status(401).json({ success: false, message: 'Token inválido', code: 'INVALID_TOKEN' });
+    }
+
+    const email = user.email;
+    const googleId = user?.user_metadata?.sub || (Array.isArray(user?.identities) ? user.identities[0]?.identity_data?.sub : null);
+
+    // Buscar perfil Google por email (fallback para google_id)
+    let { data: profile, error: profileError } = await supabaseAdmin
+      .from('google_user_profiles')
+      .select('*')
+      .eq('email', email)
+      .maybeSingle();
+
+    if ((!profile || profileError) && googleId) {
+      const { data: profileByGoogle, error: profileGoogleErr } = await supabaseAdmin
+        .from('google_user_profiles')
+        .select('*')
+        .eq('google_id', googleId)
+        .maybeSingle();
+      profile = profileByGoogle;
+      profileError = profileGoogleErr;
+    }
+
+    if (profileError || !profile) {
+      return res.status(404).json({
+        success: false,
+        message: 'Perfil Google não encontrado',
+        code: 'GOOGLE_PROFILE_NOT_FOUND'
+      });
+    }
+
+    const { data: addressData } = await supabaseAdmin
+      .from('google_user_addresses')
+      .select('*')
+      .eq('google_user_id', profile.id)
+      .maybeSingle();
+
+    const userData = {
+      id: profile.id,
+      google_id: profile.google_id,
+      email: profile.email,
+      nome: profile.nome,
+      telefone: profile.telefone,
+      cpf: profile.cpf,
+      data_nascimento: profile.data_nascimento,
+      created_at: profile.created_at,
+      updated_at: profile.updated_at,
+      isGoogleUser: true,
+      address: addressData || null
+    };
+
+    req.user = userData;
+    req.userId = userData.id;
+    req.supabaseUser = user;
+    req.supabaseAuthUser = user;
+
+    next();
+  } catch (e) {
+    return res.status(401).json({
+      success: false,
+      message: 'Token inválido',
+      code: 'INVALID_TOKEN',
+      debug: { error: e.message }
+    });
+  }
+};
+
 module.exports = {
   authenticateToken,
   authenticateUser,
   optionalAuth,
   authenticateAdmin,
   checkAdminStatus,
-  authenticateGoogleUser
+  authenticateGoogleUser,
+  authenticateSupabaseGoogleUser
 };
 

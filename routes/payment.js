@@ -1,7 +1,7 @@
 const express = require('express');
 const { getMercadoPago } = require('../config/mercadopago');
 const { supabase } = require('../config/supabase');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, authenticateGoogleUser } = require('../middleware/auth');
 const router = express.Router();
 
 /**
@@ -319,6 +319,83 @@ router.get('/config', async (req, res, next) => {
     });
   } catch (error) {
     console.error('Erro ao obter configurações:', error);
+    next(error);
+  }
+});
+
+/**
+ * POST /payment/create_preference
+ * Cria uma preferência de pagamento (Checkout Redirect)
+ */
+router.post('/create_preference', authenticateGoogleUser, async (req, res, next) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuário não autenticado' });
+    }
+
+    const { data: cartRows, error: cartErr } = await supabase
+      .from('cart_items')
+      .select(`
+        id,
+        quantity,
+        price,
+        carts!inner(user_id),
+        product_variants:product_variant_id (
+          id,
+          name,
+          images,
+          products:product_id (
+            id,
+            name
+          )
+        )
+      `)
+      .eq('carts.user_id', userId);
+
+    if (cartErr) {
+      console.error('Erro ao buscar carrinho para preferência:', cartErr);
+      return res.status(500).json({ error: 'Erro ao buscar itens do carrinho' });
+    }
+
+    const preferenceItems = (cartRows || []).map(item => ({
+      title:
+        item.product_variants?.products?.name ||
+        item.product_variants?.name ||
+        'Item',
+      quantity: Number(item.quantity || 1),
+      unit_price: Number(item.price || 0)
+    }));
+
+    if (!preferenceItems.length) {
+      return res.status(400).json({ error: 'Carrinho vazio' });
+    }
+
+    const mercadoPago = getMercadoPago();
+    const frontUrl = process.env.FRONTEND_URL || 'https://www.rosia.com.br';
+
+    const preferenceBody = {
+      items: preferenceItems,
+      back_urls: {
+        success: `${frontUrl}/sucesso`,
+        failure: `${frontUrl}/erro`,
+        pending: `${frontUrl}/pendente`
+      },
+      auto_return: 'approved'
+    };
+
+    const response = await mercadoPago.createPreference(preferenceBody);
+    const preferenceId = response.id || response.body?.id;
+    const initPoint = response.init_point || response.body?.init_point;
+    const sandboxInitPoint = response.sandbox_init_point || response.body?.sandbox_init_point;
+
+    if (!preferenceId) {
+      return res.status(500).json({ error: 'Preferência criada sem ID' });
+    }
+
+    res.json({ preferenceId, init_point: initPoint, sandbox_init_point: sandboxInitPoint });
+  } catch (error) {
+    console.error('Erro ao criar preferência:', error);
     next(error);
   }
 });

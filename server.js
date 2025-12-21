@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ override: true });
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -14,6 +14,7 @@ const webhookRoutes = require('./routes/webhook');
 const uploadRoutes = require('./routes/upload');
 const adminRoutes = require('./routes/admin');
 const paymentRoutes = require('./routes/payment');
+const paymentsRoutes = require('./routes/payments');
 const profileRoutes = require('./routes/profile');
 const usersRoutes = require('./routes/users');
 const profileConfigRoutes = require('./routes/profile-config');
@@ -21,6 +22,8 @@ const cepRoutes = require('./routes/cep');
 const debugRoutes = require('./routes/debug');
 const testAuthRoutes = require('./routes/test-auth');
 const googleUsersRoutes = require('./routes/google-users');
+const cartRoutes = require('./routes/cart');
+const singleOrderRoutes = require('./routes/order');
 
 // Importar middlewares
 const errorHandler = require('./middleware/errorHandler');
@@ -62,41 +65,48 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(cors({
-  origin: [
-    process.env.FRONTEND_URL,
-    process.env.FRONTEND_URL_LOCAL, 
-    'http://localhost:3000',
-    'http://localhost:5173', // Vite dev server
-    'http://localhost:8080', // Frontend local na porta 8080
-    'http://127.0.0.1:8080', // Frontend local na porta 8080 (127.0.0.1)
+// Configuração de CORS por ambiente
+const isDev = process.env.NODE_ENV !== 'production';
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  process.env.FRONTEND_URL_LOCAL,
+  'https://www.rosia.com.br',
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://localhost:8888',
+  'https://nsazbeovtmmetpiyokqc.supabase.co',
+  'https://accounts.google.com',
+  'https://apis.google.com',
+  'https://www.googleapis.com',
+  'https://oauth2.googleapis.com'
+];
+
+if (!isDev) {
+  allowedOrigins.push(
     'https://www.rosia.com.br',
     'https://rosia.com.br', // Domínio sem www
     'https://rosialoja-front-rosialastcommit.vercel.app', // Frontend na Vercel
-    'https://back-end-rosia02.vercel.app', // Backend na Vercel
-    'https://nsazbeovtmmetpiyokqc.supabase.co', // Supabase para OAuth
-    'https://accounts.google.com', // Google OAuth
-    'https://apis.google.com', // Google APIs
-    'http://192.168.0.13:8080',
-    // Domínios do Google para OAuth
-    'https://www.googleapis.com',
-    'https://oauth2.googleapis.com'
-  ].filter(Boolean),
+    'https://back-end-rosia02.vercel.app' // Backend na Vercel
+  );
+}
+
+app.use(cors({
+  origin: allowedOrigins.filter(Boolean),
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: [
     'Content-Type',
-    'Authorization', 
+    'Authorization',
     'X-Requested-With',
     'Accept',
     'Origin',
     'Access-Control-Allow-Origin',
-    'Access-Control-Allow-Credentials'
+    'Access-Control-Allow-Credentials',
+    'X-Idempotency-Key'
   ],
   optionsSuccessStatus: 200
 }));
 
-// Middlewares de parsing (devem vir antes das rotas)
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -117,11 +127,88 @@ app.use('/api/checkout', authenticateToken, checkoutRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/payment', paymentRoutes);
+
+// Rotas públicas do MercadoPago (sem autenticação) - DEVE VIR ANTES DAS ROTAS PROTEGIDAS
+app.get('/api/payments/config', (req, res) => {
+  const publicKey = process.env.MP_PUBLIC_KEY || process.env.VITE_MP_PUBLIC_KEY;
+  if (!publicKey) {
+    return res.status(500).json({ error: "Public key não configurada" });
+  }
+  return res.json({ publicKey: publicKey });
+});
+
+app.get('/api/payments/methods', (req, res) => {
+  console.log('🔓 Rota pública /api/payments/methods acessada');
+  // Endpoint público para buscar métodos de pagamento
+  paymentsRoutes.handle(req, res, () => {});
+});
+
+// Endpoints públicos para o Brick criar token e processar pagamento
+app.post('/api/payments/mp/card-token', (req, res) => {
+  paymentsRoutes.handle(req, res, () => {});
+});
+
+app.post('/api/payments/mp/credit-card', (req, res) => {
+  paymentsRoutes.handle(req, res, () => {});
+});
+
+// 🔓 Endpoint público para criar pagamento Pix (sem autenticação)
+app.post('/api/pix/create', (req, res) => {
+  paymentsRoutes.handle(req, res, () => {});
+});
+
+app.use('/api/payments/mp/process', (req, res, next) => {
+  console.log('➡️', req.method, req.path);
+  console.log('📦 BODY RECEBIDO:', req.body);
+  console.log('Headers:', req.headers['content-type']);
+  if (!req.body) {
+    return res.status(400).json({ error: 'Body vazio' });
+  }
+  next();
+});
+
+app.post('/api/payments/mp/process', (req, res) => {
+  paymentsRoutes.handle(req, res, () => {});
+});
+const corsOptionsForOrdersCard = {
+  origin: (origin, callback) => {
+    const allowed = allowedOrigins.filter(Boolean);
+    if (!origin) return callback(null, false);
+    if (allowed.includes(origin)) return callback(null, true);
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  optionsSuccessStatus: 200
+};
+
+app.options('/process_payment', cors(corsOptionsForOrdersCard), (req, res) => {
+  res.sendStatus(200);
+});
+app.post('/process_payment', (req, res) => {
+  console.log('HEADERS:', req.headers);
+  console.log('BODY:', req.body);
+  paymentsRoutes.handle(req, res, () => {});
+});
+
+// Compatível com clientes que prefixam com /api
+app.options('/api/process_payment', cors(corsOptionsForOrdersCard), (req, res) => {
+  res.sendStatus(200);
+});
+app.post('/api/process_payment', (req, res) => {
+  console.log('HEADERS:', req.headers);
+  console.log('BODY:', req.body);
+  paymentsRoutes.handle(req, res, () => {});
+});
+
+// Rotas protegidas de pagamentos (todas as demais) - SEMPRE DEPOIS DAS PÚBLICAS
+app.use('/api/payments', authenticateToken, paymentsRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/profile-config', profileConfigRoutes);
 app.use('/api/test-auth', testAuthRoutes);
 app.use('/api/google-users', googleUsersRoutes);
+app.use('/api/cart', cartRoutes);
+app.use('/api/order', singleOrderRoutes);
 
 // Rotas sem prefixo /api (para compatibilidade)
 app.use('/auth', authRoutes);
@@ -133,6 +220,7 @@ app.use('/checkout', authenticateToken, checkoutRoutes);
 app.use('/upload', uploadRoutes);
 app.use('/admin', adminRoutes);
 app.use('/payment', paymentRoutes);
+app.use('/payments', paymentsRoutes);
 app.use('/profile', profileRoutes);
 
 // Rota raiz
