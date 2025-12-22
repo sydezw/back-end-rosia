@@ -289,18 +289,14 @@ router.post('/process_payment', async (req, res) => {
 
     const response = await mp.payment.create({ body }, { idempotencyKey });
     const data = response.body || response;
-    return res.status(200).json({
+    return res.status(201).json({
       status: data.status,
       status_detail: data.status_detail,
-      id: data.id,
-      transaction_amount: Number(Number(transactionAmount).toFixed(2))
+      id: data.id
     });
   } catch (error) {
-    const mpError = error?.cause?.[0] || error?.response?.data || { message: error.message };
-    return res.status(500).json({
-      error: 'Erro ao processar pagamento',
-      details: mpError
-    });
+    console.error('Erro ao processar:', error);
+    return res.status(500).json({ error: 'Erro interno' });
   }
 });
 
