@@ -9,25 +9,28 @@ const router = express.Router();
  */
 router.post('/payment', async (req, res, next) => {
   try {
-    const signature = req.headers['x-webhook-signature'] || req.headers['x-signature'];
-    const payload = req.body;
-
-    // Verificar assinatura do webhook (segurança)
-    if (process.env.PAYMENT_WEBHOOK_SECRET) {
-      const isValidSignature = verifyWebhookSignature(payload, signature, process.env.PAYMENT_WEBHOOK_SECRET);
-      if (!isValidSignature) {
-        return res.status(401).json({
-          error: 'Assinatura do webhook inválida',
-          code: 'INVALID_WEBHOOK_SIGNATURE'
-        });
+    const signature = req.headers['x-signature'] || req.headers['x-webhook-signature'];
+    const requestId = req.headers['x-request-id'];
+    const secret = process.env.MP_WEBHOOK_SECRET || process.env.PAYMENT_WEBHOOK_SECRET;
+    if (secret && (!signature || !requestId)) {
+      return res.sendStatus(401);
+    }
+    if (secret) {
+      const bodyString = Buffer.isBuffer(req.body)
+        ? req.body.toString('utf8')
+        : (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
+      const payload = `${requestId}.${bodyString}`;
+      const expected = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+      if (expected !== signature) {
+        return res.sendStatus(401);
       }
     }
 
     // Parse do payload se for string
     let webhookData;
-    if (typeof payload === 'string') {
+    if (typeof req.body === 'string') {
       try {
-        webhookData = JSON.parse(payload);
+        webhookData = JSON.parse(req.body);
       } catch (parseError) {
         return res.status(400).json({
           error: 'Payload inválido',
@@ -35,7 +38,7 @@ router.post('/payment', async (req, res, next) => {
         });
       }
     } else {
-      webhookData = payload;
+      webhookData = Buffer.isBuffer(req.body) ? JSON.parse(req.body.toString('utf8')) : req.body;
     }
 
     // Processar diferentes tipos de eventos
@@ -93,7 +96,25 @@ router.post('/payment', async (req, res, next) => {
 
 router.post('/mercadopago', async (req, res) => {
   try {
-    const payload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    const signature = req.headers['x-signature'] || req.headers['x-webhook-signature'];
+    const requestId = req.headers['x-request-id'];
+    const secret = process.env.MP_WEBHOOK_SECRET || process.env.PAYMENT_WEBHOOK_SECRET;
+    if (secret && (!signature || !requestId)) {
+      return res.sendStatus(401);
+    }
+    if (secret) {
+      const bodyString = Buffer.isBuffer(req.body)
+        ? req.body.toString('utf8')
+        : (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
+      const payloadStr = `${requestId}.${bodyString}`;
+      const expected = crypto.createHmac('sha256', secret).update(payloadStr).digest('hex');
+      if (expected !== signature) {
+        return res.sendStatus(401);
+      }
+    }
+    const payload = Buffer.isBuffer(req.body)
+      ? JSON.parse(req.body.toString('utf8'))
+      : (typeof req.body === 'string' ? JSON.parse(req.body) : req.body);
     const { type, data } = payload || {};
     if (type === 'payment' && data && data.id) {
       return await handleMercadoPagoWebhook(payload, res);

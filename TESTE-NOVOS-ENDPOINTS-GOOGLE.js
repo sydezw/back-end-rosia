@@ -227,7 +227,7 @@ async function verificarServidor() {
     const options = {
       protocol: 'https:',
       hostname: 'back-end-rosia02.vercel.app',
-      path: '/api/health',
+      path: '/health',
       method: 'GET',
       headers: {
         'Content-Type': 'application/json'

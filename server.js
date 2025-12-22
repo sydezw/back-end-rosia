@@ -15,6 +15,7 @@ const uploadRoutes = require('./routes/upload');
 const adminRoutes = require('./routes/admin');
 const paymentRoutes = require('./routes/payment');
 const paymentsRoutes = require('./routes/payments');
+const installmentsRoutes = require('./routes/installments');
 const profileRoutes = require('./routes/profile');
 const usersRoutes = require('./routes/users');
 const profileConfigRoutes = require('./routes/profile-config');
@@ -47,6 +48,9 @@ const limiter = rateLimit({
 app.use(helmet());
 app.use(limiter);
 app.use(requestLogger);
+app.use((req, res, next) => { console.log('REQ:', req.method, req.url); next(); });
+app.use(cors());
+app.options('*', cors());
 
 // Servir arquivos estáticos
 app.use(express.static('public'));
@@ -112,6 +116,7 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Middleware específico para webhook (após express.json para não interferir)
 app.use('/webhook', express.raw({ type: 'application/json' }));
+app.use('/api/webhook', express.raw({ type: 'application/json' }));
 
 // Rotas da API
 app.use('/api/auth', authRoutes);
@@ -120,6 +125,7 @@ app.use('/api/shipping', shippingRoutes);
 app.use('/api/webhook', webhookRoutes);
 app.use('/api/cep', cepRoutes);
 app.use('/api/debug', debugRoutes);
+app.use('/api', installmentsRoutes);
 
 // Rotas protegidas
 app.use('/api/orders', authenticateToken, orderRoutes);
@@ -221,6 +227,7 @@ app.use('/upload', uploadRoutes);
 app.use('/admin', adminRoutes);
 app.use('/payment', paymentRoutes);
 app.use('/payments', paymentsRoutes);
+app.use('/installments', installmentsRoutes);
 app.use('/profile', profileRoutes);
 
 // Rota raiz
