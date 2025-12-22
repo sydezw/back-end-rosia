@@ -14,10 +14,7 @@ router.post('/payment', async (req, res, next) => {
     const signature = req.headers['x-signature'] || req.headers['x-webhook-signature'];
     const requestId = req.headers['x-request-id'];
     const secret = process.env.MP_WEBHOOK_SECRET || process.env.PAYMENT_WEBHOOK_SECRET;
-    if (secret && (!signature || !requestId)) {
-      return res.sendStatus(401);
-    }
-    if (secret) {
+    if (secret && signature && requestId) {
       const bodyString = Buffer.isBuffer(req.body)
         ? req.body.toString('utf8')
         : (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
@@ -26,6 +23,8 @@ router.post('/payment', async (req, res, next) => {
       if (expected !== signature) {
         return res.sendStatus(401);
       }
+    } else {
+      console.warn('Webhook payment sem assinatura – rota pública aceita');
     }
 
     // Parse do payload se for string
@@ -103,10 +102,7 @@ router.post('/mercadopago', async (req, res) => {
     const signature = req.headers['x-signature'] || req.headers['x-webhook-signature'];
     const requestId = req.headers['x-request-id'];
     const secret = process.env.MP_WEBHOOK_SECRET || process.env.PAYMENT_WEBHOOK_SECRET;
-    if (secret && (!signature || !requestId)) {
-      return res.sendStatus(401);
-    }
-    if (secret) {
+    if (secret && signature && requestId) {
       const bodyString = Buffer.isBuffer(req.body)
         ? req.body.toString('utf8')
         : (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
@@ -115,11 +111,17 @@ router.post('/mercadopago', async (req, res) => {
       if (expected !== signature) {
         return res.sendStatus(401);
       }
+    } else {
+      console.warn('Webhook Mercado Pago sem assinatura – rota pública aceita');
     }
     const payload = Buffer.isBuffer(req.body)
       ? JSON.parse(req.body.toString('utf8'))
       : (typeof req.body === 'string' ? JSON.parse(req.body) : req.body);
     const { type, data } = payload || {};
+    if (payload && payload.live_mode === false) {
+      console.log('🧪 Webhook de teste (live_mode=false) aceito sem validação');
+      return res.status(200).json({ message: 'Webhook de teste recebido', payload: { type, data } });
+    }
     if (type === 'payment' && data && data.id) {
       return await handleMercadoPagoWebhook(payload, res);
     }

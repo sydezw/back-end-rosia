@@ -100,19 +100,15 @@ CREATE TABLE IF NOT EXISTS coupon_uses (
 );
 
 -- Índices para melhor performance
-ALTER TABLE products ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true;
-CREATE INDEX IF NOT EXISTS idx_products_active ON products(active);
-CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
-CREATE INDEX IF NOT EXISTS idx_products_featured ON products(featured);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
+CREATE INDEX IF NOT EXISTS idx_products_is_active ON products(is_active);
+CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
 CREATE INDEX IF NOT EXISTS idx_products_created_at ON products(created_at);
-CREATE INDEX IF NOT EXISTS idx_products_colors ON products USING GIN (colors);
-CREATE INDEX IF NOT EXISTS idx_products_sizes ON products USING GIN (sizes);
-CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand);
+CREATE INDEX IF NOT EXISTS idx_products_brand_id ON products(brand_id);
 
 CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
-CREATE INDEX IF NOT EXISTS idx_orders_payment_id ON orders(payment_id);
 
 CREATE INDEX IF NOT EXISTS idx_user_addresses_user_id ON user_addresses(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_addresses_default ON user_addresses(user_id, is_default);
@@ -183,12 +179,12 @@ CREATE POLICY "Usuários podem criar usos de cupons" ON coupon_uses
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 
 -- Inserir alguns produtos de exemplo (roupas)
-INSERT INTO products (name, description, price, stock, category, image_url, colors, sizes, material, brand, weight, volume) VALUES
-('Camiseta Básica Feminina', 'Camiseta 100% algodão com modelagem feminina', 29.90, 50, 'Camisetas', 'https://example.com/camiseta-basica.jpg', '["Branco", "Preto", "Azul", "Rosa"]', '["PP", "P", "M", "G", "GG"]', 'Algodão', 'Rosita', 0.2, 0.001),
-('Vestido Floral Elegante', 'Vestido midi com estampa floral delicada', 89.90, 25, 'Vestidos', 'https://example.com/vestido-floral.jpg', '["Azul", "Rosa", "Verde"]', '["P", "M", "G", "GG"]', 'Viscose', 'Rosita', 0.3, 0.002),
-('Calça Jeans Skinny', 'Calça jeans com elastano para maior conforto', 79.90, 30, 'Calças', 'https://example.com/calca-jeans.jpg', '["Azul Escuro", "Azul Claro", "Preto"]', '["36", "38", "40", "42", "44"]', 'Algodão/Elastano', 'Rosita', 0.5, 0.003),
-('Blusa de Seda Premium', 'Blusa elegante em seda natural', 149.90, 15, 'Blusas', 'https://example.com/blusa-seda.jpg', '["Branco", "Nude", "Preto", "Azul Marinho"]', '["P", "M", "G"]', 'Seda', 'Rosita Premium', 0.15, 0.001),
-('Saia Midi Plissada', 'Saia midi com pregas elegantes', 69.90, 20, 'Saias', 'https://example.com/saia-plissada.jpg', '["Preto", "Azul Marinho", "Vinho", "Camel"]', '["P", "M", "G", "GG"]', 'Poliéster', 'Rosita', 0.25, 0.002);
+-- INSERT INTO products (name, description, price, stock, category, image_url, colors, sizes, material, brand, weight, volume) VALUES
+-- ('Camiseta Básica Feminina', 'Camiseta 100% algodão com modelagem feminina', 29.90, 50, 'Camisetas', 'https://example.com/camiseta-basica.jpg', '["Branco", "Preto", "Azul", "Rosa"]', '["PP", "P", "M", "G", "GG"]', 'Algodão', 'Rosita', 0.2, 0.001),
+-- ('Vestido Floral Elegante', 'Vestido midi com estampa floral delicada', 89.90, 25, 'Vestidos', 'https://example.com/vestido-floral.jpg', '["Azul", "Rosa", "Verde"]', '["P", "M", "G", "GG"]', 'Viscose', 'Rosita', 0.3, 0.002),
+-- ('Calça Jeans Skinny', 'Calça jeans com elastano para maior conforto', 79.90, 30, 'Calças', 'https://example.com/calca-jeans.jpg', '["Azul Escuro", "Azul Claro", "Preto"]', '["36", "38", "40", "42", "44"]', 'Algodão/Elastano', 'Rosita', 0.5, 0.003),
+-- ('Blusa de Seda Premium', 'Blusa elegante em seda natural', 149.90, 15, 'Blusas', 'https://example.com/blusa-seda.jpg', '["Branco", "Nude", "Preto", "Azul Marinho"]', '["P", "M", "G"]', 'Seda', 'Rosita Premium', 0.15, 0.001),
+-- ('Saia Midi Plissada', 'Saia midi com pregas elegantes', 69.90, 20, 'Saias', 'https://example.com/saia-plissada.jpg', '["Preto", "Azul Marinho", "Vinho", "Camel"]', '["P", "M", "G", "GG"]', 'Poliéster', 'Rosita', 0.25, 0.002);
 
 -- Inserir alguns cupons de exemplo
 INSERT INTO coupons (code, description, discount_type, discount_value, min_order_value, max_uses, valid_until) VALUES
@@ -203,46 +199,55 @@ COMMENT ON TABLE user_addresses IS 'Endereços salvos dos usuários';
 COMMENT ON TABLE coupons IS 'Cupons de desconto disponíveis';
 COMMENT ON TABLE coupon_uses IS 'Registro de uso dos cupons';
 
-COMMENT ON COLUMN products.items IS 'Array JSON com itens do pedido: [{product_id, product_name, product_price, quantity, total}]';
+COMMENT ON COLUMN orders.items IS 'Array JSON com itens do pedido: [{product_id, product_name, product_price, quantity, total}]';
 COMMENT ON COLUMN orders.shipping_address IS 'JSON com endereço: {logradouro, numero, complemento, bairro, cidade, estado, cep}';
 COMMENT ON COLUMN orders.payment_data IS 'Dados do webhook do gateway de pagamento';
-COMMENT ON COLUMN products.images IS 'Array de URLs das imagens do produto';
-COMMENT ON COLUMN products.metadata IS 'Dados extras do produto (especificações, etc.)';
 
 -- Função para buscar produtos com filtros
 CREATE OR REPLACE FUNCTION search_products(
   search_term TEXT DEFAULT NULL,
   category_filter TEXT DEFAULT NULL,
-  min_price DECIMAL DEFAULT NULL,
-  max_price DECIMAL DEFAULT NULL,
+  min_price NUMERIC DEFAULT NULL,
+  max_price NUMERIC DEFAULT NULL,
   limit_count INTEGER DEFAULT 20,
   offset_count INTEGER DEFAULT 0
 )
 RETURNS TABLE (
   id UUID,
-  name VARCHAR,
+  name TEXT,
   description TEXT,
-  price DECIMAL,
+  price NUMERIC,
   stock INTEGER,
-  category VARCHAR,
+  category TEXT,
   image_url TEXT,
   created_at TIMESTAMP WITH TIME ZONE
 ) AS $$
 BEGIN
   RETURN QUERY
   SELECT 
-    p.id, p.name, p.description, p.price, p.stock, 
-    p.category, p.image_url, p.created_at
+    p.id,
+    p.name,
+    p.description,
+    COALESCE(p.base_price, 0) AS price,
+    NULL::INTEGER AS stock,
+    COALESCE(c.slug, c.name)::TEXT AS category,
+    NULL::TEXT AS image_url,
+    p.created_at
   FROM products p
+  LEFT JOIN categories c ON c.id = p.category_id
   WHERE 
-    p.active = true
-    AND p.stock > 0
+    (p.is_active = true)
     AND (search_term IS NULL OR 
          p.name ILIKE '%' || search_term || '%' OR 
          p.description ILIKE '%' || search_term || '%')
-    AND (category_filter IS NULL OR p.category = category_filter)
-    AND (min_price IS NULL OR p.price >= min_price)
-    AND (max_price IS NULL OR p.price <= max_price)
+    AND (
+         category_filter IS NULL OR 
+         c.slug = category_filter OR 
+         c.name = category_filter OR 
+         p.category_id::text = category_filter
+    )
+    AND (min_price IS NULL OR COALESCE(p.base_price, 0) >= min_price)
+    AND (max_price IS NULL OR COALESCE(p.base_price, 0) <= max_price)
   ORDER BY p.created_at DESC
   LIMIT limit_count
   OFFSET offset_count;
@@ -251,3 +256,5 @@ $$ LANGUAGE plpgsql;
 -- Ajustes de coluna para bases já existentes
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_id VARCHAR(100);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50);
+CREATE INDEX IF NOT EXISTS idx_orders_payment_id ON orders(payment_id);
+CREATE INDEX IF NOT EXISTS idx_orders_payment_status ON orders(payment_status);
