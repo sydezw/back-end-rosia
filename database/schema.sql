@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS coupon_uses (
 );
 
 -- Índices para melhor performance
+ALTER TABLE products ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true;
 CREATE INDEX IF NOT EXISTS idx_products_active ON products(active);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
 CREATE INDEX IF NOT EXISTS idx_products_featured ON products(featured);
