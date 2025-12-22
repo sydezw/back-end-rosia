@@ -384,15 +384,26 @@ async function handleMercadoPagoWebhook(webhookData, res) {
     
     // Buscar pedido pelo payment_id
     console.log('🔎 Buscando order por payment_id:', paymentId);
-    const { data: order, error: orderError } = await supabase
+    let { data: order, error: orderError } = await supabase
       .from('orders')
       .select('*')
       .eq('payment_id', paymentId)
       .single();
     
     if (orderError || !order) {
-      console.log(`Pedido não encontrado para pagamento ${paymentId}`);
-      return res.status(200).json({ message: 'Pagamento não associado a pedido' });
+      const extRef = paymentData.external_reference || null;
+      if (extRef) {
+        const { data: orderByRef } = await supabase
+          .from('orders')
+          .select('*')
+          .eq('id', extRef)
+          .maybeSingle();
+        order = orderByRef || null;
+      }
+      if (!order) {
+        console.log(`Pedido não encontrado para pagamento ${paymentId}`);
+        return res.status(200).json({ message: 'Pagamento não associado a pedido' });
+      }
     }
     
     const orderId = order.id;

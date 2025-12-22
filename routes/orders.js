@@ -78,42 +78,60 @@ router.get('/:id', async (req, res, next) => {
     const { id } = req.params;
     const userId = req.userId;
 
-    // Validar se ID é um UUID válido
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(id)) {
-      return res.status(400).json({
-        error: 'ID do pedido inválido',
-        code: 'INVALID_ORDER_ID'
-      });
-    }
-
     const { data: order, error } = await supabase
       .from('orders')
       .select('*')
-      .eq('id', id)
       .eq('user_id', userId)
-      .single();
+      .or(`id.eq.${id},external_reference.eq.${id},payment_id.eq.${id}`)
+      .maybeSingle();
 
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return res.status(404).json({
-          error: 'Pedido não encontrado',
-          code: 'ORDER_NOT_FOUND'
-        });
-      }
-      throw error;
+    if (error || !order) {
+      return res.status(404).json({
+        error: 'Pedido não encontrado',
+        code: 'ORDER_NOT_FOUND'
+      });
     }
 
-    // Formatar resposta com detalhes completos
+    let items = Array.isArray(order.items) ? order.items : [];
+
+    if (!items || items.length === 0) {
+      const { data: orderItems } = await supabase
+        .from('order_items')
+        .select('*')
+        .eq('order_id', order.id);
+      if (Array.isArray(orderItems)) {
+        items = orderItems.map(it => ({
+          product_id: it.product_id,
+          product_name: it.product_name,
+          quantity: it.quantity,
+          product_price: Number(it.unit_price),
+          total: Number(it.unit_price) * Number(it.quantity),
+          size: it.selected_size || null,
+          color: it.selected_color || null
+        }));
+      }
+    } else {
+      items = items.map(it => ({
+        product_id: it.product_id,
+        product_name: it.product_name,
+        quantity: it.quantity,
+        product_price: it.product_price ?? it.unit_price,
+        total: it.total ?? (it.unit_price && it.quantity ? Number(it.unit_price) * Number(it.quantity) : it.total),
+        size: it.size ?? it.selected_size ?? null,
+        color: it.color ?? it.selected_color ?? null
+      }));
+    }
+
     const orderDetails = {
       id: order.id,
-      status: order.status,
-      payment_method: order.payment_method,
+      external_reference: order.external_reference || order.payment_id || order.id,
+      status: order.payment_status || order.status,
       subtotal: order.subtotal,
       shipping_cost: order.shipping_cost,
       total: order.total,
-      items: order.items,
+      payment_method: order.payment_method,
       shipping_address: order.shipping_address,
+      items,
       created_at: order.created_at,
       updated_at: order.updated_at,
       tracking_code: order.tracking_code || null,
