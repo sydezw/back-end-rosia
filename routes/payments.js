@@ -272,6 +272,7 @@ router.post('/process_payment', async (req, res) => {
 
     const idempotencyKey = req.body?.idempotencyKey || req.body?.idempotency_key || uuidv4();
     const mp = getMercadoPago();
+    const externalRef = req.body?.external_reference || uuidv4();
     const body = {
       transaction_amount: Number(Number(transactionAmount).toFixed(2)),
       token,
@@ -280,84 +281,69 @@ router.post('/process_payment', async (req, res) => {
       payment_method_id: paymentMethodId,
       issuer_id: issuerId,
       payer,
-      external_reference: req.body?.external_reference,
+      external_reference: externalRef,
       binary_mode: req.body?.binary_mode === undefined ? true : !!req.body.binary_mode,
       statement_descriptor: req.body?.statement_descriptor,
       notification_url: `${process.env.BACKEND_URL || 'https://back-end-rosia02.vercel.app'}/webhook/payment`,
       additional_info: req.body?.additional_info
     };
 
-    const response = await mp.payment.create({ body }, { idempotencyKey });
-    const mpData = response.body || response;
+    let mpData;
+    try {
+      const resp = await mp.payment.create({ body }, { idempotencyKey });
+      mpData = resp.body || resp;
+    } catch (e) {
+      console.error('Erro MP:', e);
+      return res.status(400).json({ error: 'Erro ao processar com Mercado Pago' });
+    }
+
+    let shippingAddress = null;
+    if (req.body?.shipping_address) {
+      shippingAddress = req.body.shipping_address;
+    }
+
+    const subtotal = req.body?.subtotal != null ? Number(req.body.subtotal) : undefined;
+    const shipping_cost = req.body?.shipping_cost != null ? Number(req.body.shipping_cost) : 0;
+    const total = req.body?.transaction_amount != null
+      ? Number(req.body.transaction_amount)
+      : (subtotal != null ? Number((subtotal + shipping_cost).toFixed(2)) : undefined);
+
+    const payment_method = (req.body?.payment_method_id === 'pix') ? 'pix' : (mpData?.payment_method_id || req.body?.payment_method_id);
+    const status = mpData?.status === 'approved' ? 'pago' : 'pendente';
+    const payment_status = mpData?.status || 'pending';
+
+    const orderPayload = {
+      user_id: req.body?.supabase_user_id || req.body?.user_id || req.body?.google_user_profile_id,
+      external_reference: externalRef,
+      subtotal,
+      shipping_cost,
+      total,
+      status,
+      payment_id: mpData?.id ? String(mpData.id) : null,
+      payment_method,
+      payment_status,
+      shipping_address: shippingAddress || null,
+      updated_at: new Date().toISOString(),
+      created_at: new Date().toISOString()
+    };
 
     let createdOrder = null;
-    if (mpData && mpData.id) {
-      let shippingAddress = null;
-      const googleAddressId = req.body?.google_user_address_id;
-      if (googleAddressId) {
-        try {
-          const { data: address } = await supabaseAdmin
-            .from('google_user_addresses')
-            .select('*')
-            .eq('id', googleAddressId)
-            .maybeSingle();
-          if (address) {
-            shippingAddress = {
-              cep: address.cep,
-              logradouro: address.logradouro,
-              numero: address.numero,
-              bairro: address.bairro,
-              cidade: address.cidade,
-              estado: address.estado,
-              complemento: address.complemento || null
-            };
-          }
-        } catch (_) {}
-      }
-
-      if (!shippingAddress && req.body?.shipping_address) {
-        shippingAddress = req.body.shipping_address;
-      }
-
-      const subtotal = req.body?.subtotal != null ? Number(req.body.subtotal) : undefined;
-      const shipping_cost = req.body?.shipping_cost != null ? Number(req.body.shipping_cost) : 0;
-      const total = req.body?.transaction_amount != null
-        ? Number(req.body.transaction_amount)
-        : (subtotal != null ? Number((subtotal + shipping_cost).toFixed(2)) : undefined);
-
-      const status = mpData.status === 'approved' ? 'pago' : 'pendente';
-      const payment_method = (req.body?.payment_method_id === 'pix') ? 'pix' : (mpData.payment_method_id || req.body?.payment_method_id);
-
-      const orderPayload = {
-        user_id: req.body?.supabase_user_id || req.body?.user_id || req.body?.google_user_profile_id,
-        subtotal,
-        shipping_cost,
-        total,
-        status,
-        payment_id: String(mpData.id),
-        payment_method,
-        payment_status: mpData.status,
-        shipping_address: shippingAddress || req.body?.shipping_address || null,
-        updated_at: new Date().toISOString(),
-        created_at: new Date().toISOString()
-      };
-
-      try {
-        const { data: orderInserted } = await supabaseAdmin
-          .from('orders')
-          .insert([orderPayload])
-          .select()
-          .maybeSingle();
-        createdOrder = orderInserted || null;
-      } catch (insertError) {
-        createdOrder = null;
-      }
+    try {
+      const { data: orderInserted } = await supabaseAdmin
+        .from('orders')
+        .insert([orderPayload])
+        .select()
+        .maybeSingle();
+      createdOrder = orderInserted || null;
+    } catch (insertError) {
+      console.error('Erro ao inserir pedido:', insertError);
     }
 
     return res.status(201).json({
       status: mpData.status,
       status_detail: mpData.status_detail,
       id: mpData.id,
+      external_reference: externalRef,
       order: createdOrder
     });
   } catch (error) {
