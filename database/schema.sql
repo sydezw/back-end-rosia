@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS orders (
   status VARCHAR(50) NOT NULL DEFAULT 'pendente' CHECK (
     status IN ('pendente', 'pago', 'enviado', 'entregue', 'cancelado', 'pagamento_rejeitado', 'reembolsado', 'em_transito')
   ),
+  payment_status VARCHAR(50),
+  payment_id VARCHAR(100),
   payment_method VARCHAR(50) DEFAULT 'pix' CHECK (
     payment_method IN ('pix', 'cartao_credito', 'cartao_debito', 'boleto')
   ),
@@ -109,6 +111,7 @@ CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand);
 CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
+CREATE INDEX IF NOT EXISTS idx_orders_payment_id ON orders(payment_id);
 
 CREATE INDEX IF NOT EXISTS idx_user_addresses_user_id ON user_addresses(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_addresses_default ON user_addresses(user_id, is_default);
@@ -244,3 +247,6 @@ BEGIN
   OFFSET offset_count;
 END;
 $$ LANGUAGE plpgsql;
+-- Ajustes de coluna para bases já existentes
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_id VARCHAR(100);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50);

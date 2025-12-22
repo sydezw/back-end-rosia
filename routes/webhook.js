@@ -9,6 +9,8 @@ const router = express.Router();
  */
 router.post('/payment', async (req, res, next) => {
   try {
+    console.log('🔥 WEBHOOK RECEBIDO:', Buffer.isBuffer(req.body) ? req.body.toString('utf8') : req.body);
+    console.log({ event: req.body?.type, status: req.body?.data?.status, paymentId: req.body?.data?.id });
     const signature = req.headers['x-signature'] || req.headers['x-webhook-signature'];
     const requestId = req.headers['x-request-id'];
     const secret = process.env.MP_WEBHOOK_SECRET || process.env.PAYMENT_WEBHOOK_SECRET;
@@ -96,6 +98,8 @@ router.post('/payment', async (req, res, next) => {
 
 router.post('/mercadopago', async (req, res) => {
   try {
+    console.log('🔥 WEBHOOK RECEBIDO:', Buffer.isBuffer(req.body) ? req.body.toString('utf8') : req.body);
+    console.log({ event: req.body?.type, status: req.body?.data?.status, paymentId: req.body?.data?.id });
     const signature = req.headers['x-signature'] || req.headers['x-webhook-signature'];
     const requestId = req.headers['x-request-id'];
     const secret = process.env.MP_WEBHOOK_SECRET || process.env.PAYMENT_WEBHOOK_SECRET;
@@ -371,6 +375,7 @@ async function handleMercadoPagoWebhook(webhookData, res) {
     const paymentData = await mercadoPago.getPayment(paymentId);
     
     // Buscar pedido pelo payment_id
+    console.log('🔎 Buscando order por payment_id:', paymentId);
     const { data: order, error: orderError } = await supabase
       .from('orders')
       .select('*')
@@ -385,6 +390,7 @@ async function handleMercadoPagoWebhook(webhookData, res) {
     const orderId = order.id;
     
     // Atualizar dados do pagamento no pedido
+    console.log('🔧 Atualizando payment_status e payment_data para order:', orderId);
     await supabase
       .from('orders')
       .update({
