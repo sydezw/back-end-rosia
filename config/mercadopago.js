@@ -84,7 +84,7 @@ class MercadoPagoService {
           last_name: paymentData.payer.last_name
         },
         external_reference: paymentData.external_reference,
-        notification_url: `${process.env.BACKEND_URL || 'https://back-end-rosia02.vercel.app'}/webhook/payment`,
+        notification_url: `${process.env.BACKEND_URL || 'https://back-end-rosia02.vercel.app'}/api/webhook/mercadopago`,
         metadata: {
           order_id: paymentData.order_id
         }
