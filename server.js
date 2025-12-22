@@ -117,12 +117,14 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // Middleware específico para webhook (após express.json para não interferir)
 app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use('/api/webhook', express.raw({ type: 'application/json' }));
+app.use('/api/webhooks', express.raw({ type: 'application/json' }));
 
 // Rotas da API
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/shipping', shippingRoutes);
 app.use('/api/webhook', webhookRoutes);
+app.use('/api/webhooks', webhookRoutes);
 app.use('/api/cep', cepRoutes);
 app.use('/api/debug', debugRoutes);
 app.use('/api', installmentsRoutes);
