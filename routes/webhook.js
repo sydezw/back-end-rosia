@@ -49,8 +49,12 @@ router.post('/payment', async (req, res, next) => {
     // Processar diferentes tipos de eventos
     const eventType = webhookData.type || webhookData.event_type || webhookData.action;
     
-    // Verificar se é webhook do Mercado Pago
-    if (webhookData.data && webhookData.data.id) {
+    // Verificar se é webhook do Mercado Pago por diferentes formatos
+    const mpCandidateId = (webhookData?.data?.id)
+      || (typeof webhookData?.resource === 'string' ? webhookData.resource.split('/').pop() : undefined)
+      || webhookData?.id;
+    if (mpCandidateId) {
+      console.log('Recebi Webhook para o pagamento:', mpCandidateId);
       return await handleMercadoPagoWebhook(webhookData, res);
     }
     
@@ -374,7 +378,9 @@ async function handlePaymentRefunded(orderId, webhookData) {
  */
 async function handleMercadoPagoWebhook(webhookData, res) {
   try {
-    const paymentId = webhookData.data?.id || webhookData.id;
+    const paymentId = webhookData.data?.id
+      || (typeof webhookData?.resource === 'string' ? webhookData.resource.split('/').pop() : undefined)
+      || webhookData.id;
     if (!paymentId) {
       console.warn('⚠️ Webhook ignorado: ID de pagamento não encontrado no payload');
       return res.status(200).send('OK');
