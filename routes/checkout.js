@@ -115,6 +115,24 @@ router.post('/create', async (req, res, next) => {
       throw orderError;
     }
 
+    // Inserir itens na tabela order_items
+    try {
+      const itemsToInsert = orderItems.map(it => ({
+        order_id: orderId,
+        product_id: it.product_id,
+        quantity: it.quantity,
+        unit_price: it.product_price,
+        selected_size: items.find(x => x.product_id === it.product_id)?.size || null,
+        selected_color: items.find(x => x.product_id === it.product_id)?.color || null,
+        product_name: it.product_name
+      }));
+      await supabase
+        .from('order_items')
+        .insert(itemsToInsert);
+    } catch (itemsErr) {
+      console.error('Erro ao salvar order_items:', itemsErr);
+    }
+
     // Atualizar estoque dos produtos
     for (const item of items) {
       const product = products.find(p => p.id === item.product_id);

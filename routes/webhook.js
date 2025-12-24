@@ -378,17 +378,9 @@ async function handlePaymentRefunded(orderId, webhookData) {
  */
 async function handleMercadoPagoWebhook(webhookData, res) {
   try {
-    const paymentId = webhookData.data?.id
-      || (typeof webhookData?.resource === 'string' ? webhookData.resource.split('/').pop() : undefined)
-      || webhookData.id;
-    if (!paymentId) {
-      console.warn('⚠️ Webhook ignorado: ID de pagamento não encontrado no payload');
+    const paymentId = webhookData.data?.id || webhookData.id;
+    if (!paymentId || paymentId === '123456') {
       return res.status(200).send('OK');
-    }
-
-    if (paymentId === '123456' || webhookData.live_mode === false) {
-      console.log('🧪 Simulação de webhook detectada, respondendo 200 OK');
-      return res.status(200).json({ message: 'Teste recebido com sucesso' });
     }
 
     console.log(`🔎 Processando pagamento MP: ${paymentId}`);
@@ -398,20 +390,40 @@ async function handleMercadoPagoWebhook(webhookData, res) {
       const paymentRes = await mpPayment.get({ id: String(paymentId) });
       paymentData = paymentRes.body || paymentRes;
     } catch (apiError) {
-      console.error(`⚠️ Erro ao consultar pagamento ${paymentId} na API do MP`);
-      return res.status(200).send('Pagamento não encontrado na API');
+      return res.status(200).send('Pagamento não encontrado na API do MP');
     }
 
     const orderId = paymentData.external_reference;
-    if (!orderId) {
-      console.error(`❌ Pagamento ${paymentId} não possui external_reference (Order ID)`);
-      return res.status(200).send('Pagamento sem vínculo com pedido');
+    if (!orderId) return res.status(200).send('Sem referência de pedido');
+
+    let order = null;
+    let attempts = 0;
+    const maxAttempts = 5;
+    while (!order && attempts < maxAttempts) {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('id')
+        .or(`id.eq.${orderId},external_reference.eq.${orderId}`)
+        .maybeSingle();
+      if (data) {
+        order = data;
+      } else {
+        attempts++;
+        console.log(`⏳ Tentativa ${attempts}: Pedido ${orderId} não achado. Esperando 2s...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+
+    if (!order) {
+      console.error(`❌ Erro crítico: Pedido ${orderId} não apareceu no banco após 10s.`);
+      return res.status(200).send('Pedido não encontrado no banco de dados');
     }
 
     const { error: updateError } = await supabase
       .from('orders')
       .update({
-        status: paymentData.status === 'approved' ? 'pago' : 'pendente',
+        status: paymentData.status === 'approved' ? 'pago' :
+                paymentData.status === 'rejected' ? 'rejected' : 'pendente',
         payment_id: String(paymentId),
         payment_status: paymentData.status,
         updated_at: new Date().toISOString()
@@ -420,11 +432,11 @@ async function handleMercadoPagoWebhook(webhookData, res) {
 
     if (updateError) throw updateError;
 
-    console.log(`✅ Pedido ${orderId} atualizado para: ${paymentData.status}`);
-    return res.status(200).json({ success: true, order_id: orderId, status: paymentData.status });
+    console.log(`✅ Pedido ${orderId} atualizado com sucesso via Webhook.`);
+    return res.status(200).json({ success: true });
   } catch (error) {
-    console.error('❌ Erro crítico no webhook MP:', error.message);
-    return res.status(500).json({ error: 'Erro interno' });
+    console.error('❌ Erro no webhook:', error.message);
+    return res.status(500).json({ error: 'Erro interno ao processar webhook' });
   }
 }
 

@@ -313,6 +313,7 @@ router.post('/process_payment', async (req, res) => {
     const payment_status = mpData?.status || 'pending';
 
     const orderPayload = {
+      id: externalRef,
       user_id: req.body?.supabase_user_id || req.body?.user_id || req.body?.google_user_profile_id,
       external_reference: externalRef,
       subtotal,
@@ -536,8 +537,44 @@ router.post('/process-card', async (req, res) => {
   try {
     const mp = getMercadoPago();
 
+    const subtotal = req.body?.subtotal != null ? Number(req.body.subtotal) : undefined;
+    const shipping_cost = req.body?.shipping_cost != null ? Number(req.body.shipping_cost) : 0;
+    const total = req.body?.transaction_amount != null
+      ? Number(Number(req.body.transaction_amount).toFixed(2))
+      : (subtotal != null ? Number((subtotal + shipping_cost).toFixed(2)) : undefined);
+
+    const orderId = req.body?.external_reference || uuidv4();
+
+    const orderPayload = {
+      id: orderId,
+      user_id: req.body?.supabase_user_id || req.body?.user_id || req.body?.google_user_profile_id,
+      external_reference: orderId,
+      subtotal,
+      shipping_cost,
+      total,
+      status: 'pendente',
+      payment_method: req.body?.payment_method_id || 'credit_card',
+      payment_status: 'pending',
+      shipping_address: req.body?.shipping_address || null,
+      updated_at: new Date().toISOString(),
+      created_at: new Date().toISOString()
+    };
+
+    let createdOrder = null;
+    try {
+      const { data: orderInserted } = await supabaseAdmin
+        .from('orders')
+        .insert([orderPayload])
+        .select()
+        .maybeSingle();
+      createdOrder = orderInserted || null;
+    } catch (insertError) {
+      console.error('Erro ao inserir pedido:', insertError);
+    }
+
     const body = {
       ...req.body,
+      external_reference: orderId,
       binary_mode: req.body?.binary_mode === undefined ? true : !!req.body.binary_mode,
       notification_url: `${process.env.BACKEND_URL || 'https://back-end-rosia02.vercel.app'}/webhook/payment`
     };
@@ -548,7 +585,7 @@ router.post('/process-card', async (req, res) => {
 
     const response = await mp.payment.create({ body });
     const data = response.body || response;
-    return res.json(data);
+    return res.json({ ...data, order: createdOrder });
   } catch (err) {
     const mpError = err?.cause?.[0] || err?.response?.data;
     console.log(err);
