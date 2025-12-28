@@ -398,19 +398,19 @@ async function handleMercadoPagoWebhook(webhookData, res) {
 
     let order = null;
     let attempts = 0;
-    const maxAttempts = 5;
+    const maxAttempts = 6;
     while (!order && attempts < maxAttempts) {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('orders')
         .select('id')
-        .or(`id.eq.${orderId},external_reference.eq.${orderId}`)
+        .eq('external_reference', orderId)
         .maybeSingle();
       if (data) {
         order = data;
       } else {
         attempts++;
-        console.log(`⏳ Tentativa ${attempts}: Pedido ${orderId} não achado. Esperando 2s...`);
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        console.log(`⏳ Tentativa ${attempts}: Pedido ${orderId} não achado. Esperando 1s...`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
 
@@ -423,12 +423,13 @@ async function handleMercadoPagoWebhook(webhookData, res) {
       .from('orders')
       .update({
         status: paymentData.status === 'approved' ? 'pago' :
-                paymentData.status === 'rejected' ? 'rejected' : 'pendente',
+                paymentData.status === 'rejected' ? 'pagamento_rejeitado' : 'pendente',
         payment_id: String(paymentId),
         payment_status: paymentData.status,
+        payment_data: paymentData,
         updated_at: new Date().toISOString()
       })
-      .eq('id', orderId);
+      .eq('id', order.id);
 
     if (updateError) throw updateError;
 

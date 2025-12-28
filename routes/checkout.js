@@ -92,9 +92,11 @@ router.post('/create', async (req, res, next) => {
 
     // Criar pedido
     const orderId = uuidv4();
+    const externalRef = `ORDER-${Date.now()}`;
     const orderData = {
       id: orderId,
       user_id: userId,
+      external_reference: externalRef,
       items: orderItems,
       subtotal: subtotal,
       shipping_cost: shippingCost,
@@ -153,6 +155,7 @@ router.post('/create', async (req, res, next) => {
       message: 'Pedido criado com sucesso',
       order: {
         id: order.id,
+        external_reference: externalRef,
         total: order.total,
         status: order.status,
         items: order.items,

@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS idx_orders_external_reference ON public.orders (external_reference);

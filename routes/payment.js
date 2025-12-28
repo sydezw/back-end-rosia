@@ -1,6 +1,7 @@
 const express = require('express');
 const { getMercadoPago } = require('../config/mercadopago');
 const { supabase } = require('../config/supabase');
+const { v4: uuidv4 } = require('uuid');
 const { authenticateToken, authenticateGoogleUser } = require('../middleware/auth');
 const router = express.Router();
 
@@ -132,11 +133,11 @@ router.post('/card', authenticateToken, async (req, res, next) => {
     const paymentData = {
       token,
       transaction_amount,
-      description: `Pedido #${order_id} - Rosita Floral Elegance`,
+      description: `Pedido #${order.external_reference || order_id} - Rosita Floral Elegance`,
       installments: installments || 1,
       payment_method_id,
       issuer_id,
-      external_reference: order_id,
+      external_reference: order.external_reference || order_id,
       order_id,
       payer: {
         email: payer.email || req.user.email,
@@ -327,9 +328,9 @@ router.get('/config', async (req, res, next) => {
  * POST /payment/create_preference
  * Cria uma preferência de pagamento (Checkout Redirect)
  */
-router.post('/create_preference', authenticateGoogleUser, async (req, res, next) => {
+  router.post('/create_preference', authenticateGoogleUser, async (req, res, next) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.userId || req.user?.id;
     if (!userId) {
       return res.status(401).json({ error: 'Usuário não autenticado' });
     }
@@ -374,6 +375,47 @@ router.post('/create_preference', authenticateGoogleUser, async (req, res, next)
     const mercadoPago = getMercadoPago();
     const frontUrl = process.env.FRONTEND_URL || 'https://www.rosia.com.br';
 
+    const externalRef = `ORDER-${Date.now()}`;
+
+    const subtotal = preferenceItems.reduce((sum, it) => sum + Number(it.unit_price) * Number(it.quantity), 0);
+    const shippingCost = 0;
+    const total = Number((subtotal + shippingCost).toFixed(2));
+
+    const orderItems = (cartRows || []).map(item => ({
+      product_id: item.product_variants?.products?.id || item.product_variants?.id || null,
+      product_name: item.product_variants?.products?.name || item.product_variants?.name || 'Item',
+      product_price: Number(item.price || 0),
+      quantity: Number(item.quantity || 1),
+      total: Number(item.price || 0) * Number(item.quantity || 1)
+    }));
+
+    const orderPayload = {
+      id: uuidv4(),
+      google_user_profile_id: userId,
+      external_reference: externalRef,
+      items: orderItems,
+      subtotal: Number(subtotal.toFixed(2)),
+      shipping_cost: shippingCost,
+      total,
+      status: 'pendente',
+      payment_method: 'checkout_redirect',
+      payment_status: 'pending',
+      shipping_address: null,
+      updated_at: new Date().toISOString(),
+      created_at: new Date().toISOString()
+    };
+
+    const { data: createdOrder, error: insertErr } = await supabaseAdmin
+      .from('orders')
+      .insert([orderPayload])
+      .select()
+      .maybeSingle();
+
+    if (insertErr || !createdOrder) {
+      console.error('Erro ao criar pedido para preferência:', insertErr);
+      return res.status(500).json({ error: 'Falha ao criar pedido antes da preferência' });
+    }
+
     const preferenceBody = {
       items: preferenceItems,
       back_urls: {
@@ -381,7 +423,9 @@ router.post('/create_preference', authenticateGoogleUser, async (req, res, next)
         failure: `${frontUrl}/erro`,
         pending: `${frontUrl}/pendente`
       },
-      auto_return: 'approved'
+      auto_return: 'approved',
+      external_reference: externalRef,
+      notification_url: `${process.env.BACKEND_URL || 'https://back-end-rosia02.vercel.app'}/webhook/payment`
     };
 
     const response = await mercadoPago.createPreference(preferenceBody);
@@ -393,7 +437,7 @@ router.post('/create_preference', authenticateGoogleUser, async (req, res, next)
       return res.status(500).json({ error: 'Preferência criada sem ID' });
     }
 
-    res.json({ preferenceId, init_point: initPoint, sandbox_init_point: sandboxInitPoint });
+    res.json({ preferenceId, init_point: initPoint, sandbox_init_point: sandboxInitPoint, external_reference: externalRef, order: createdOrder });
   } catch (error) {
     console.error('Erro ao criar preferência:', error);
     next(error);
