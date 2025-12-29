@@ -274,29 +274,46 @@ router.post('/process_payment', async (req, res) => {
     const mp = getMercadoPago();
     const externalRef = req.body?.external_reference || `ORDER-${Date.now()}`;
 
-    let shippingAddress = null;
-    if (req.body?.shipping_address) {
-      shippingAddress = req.body.shipping_address;
-    }
+    let shippingAddress = req.body?.shipping_address ?? {};
 
-    const subtotal = req.body?.subtotal != null ? Number(req.body.subtotal) : undefined;
     const shipping_cost = req.body?.shipping_cost != null ? Number(req.body.shipping_cost) : 0;
+    const subtotal = req.body?.subtotal != null
+      ? Number(req.body.subtotal)
+      : (transactionAmount != null ? Number(transactionAmount) - shipping_cost : 0);
     const total = req.body?.transaction_amount != null
       ? Number(Number(req.body.transaction_amount).toFixed(2))
-      : (subtotal != null ? Number((subtotal + shipping_cost).toFixed(2)) : undefined);
+      : Number((subtotal + shipping_cost).toFixed(2));
+
+    const rawItems = Array.isArray(req.body?.items)
+      ? req.body.items
+      : (Array.isArray(req.body?.additional_info?.items) ? req.body.additional_info.items : []);
+    const items = Array.isArray(rawItems) ? rawItems : [];
+
+    let supabaseUserId = req.body?.supabase_user_id || req.body?.user_id || null;
+    if (!supabaseUserId && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+      try {
+        const authToken = req.headers.authorization.slice(7);
+        const { data: { user } } = await supabaseAdmin.auth.getUser(authToken);
+        supabaseUserId = user?.id || null;
+      } catch {}
+    }
+    if (!supabaseUserId) {
+      return res.status(400).json({ error: 'user_id obrigatório' });
+    }
 
     const orderId = uuidv4();
     const orderPayload = {
       id: orderId,
-      user_id: req.body?.supabase_user_id || req.body?.user_id || req.body?.google_user_profile_id,
+      user_id: supabaseUserId,
       external_reference: externalRef,
+      items,
       subtotal,
       shipping_cost,
       total,
       status: 'pendente',
-      payment_method: (req.body?.payment_method_id === 'pix') ? 'pix' : 'credit_card',
+      payment_method: (paymentMethodId === 'pix') ? 'pix' : 'cartao_credito',
       payment_status: 'pending',
-      shipping_address: shippingAddress || null,
+      shipping_address: shippingAddress,
       updated_at: new Date().toISOString(),
       created_at: new Date().toISOString()
     };
