@@ -351,9 +351,21 @@ router.post('/process_payment', async (req, res) => {
       return res.status(400).json({ error: 'Erro ao processar com Mercado Pago' });
     }
 
+    const mappedStatus = mpData?.status === 'approved'
+      ? 'pago'
+      : (mpData?.status === 'rejected' ? 'pagamento_rejeitado' : 'pendente');
+    const statusTimestamps = mpData?.status === 'approved'
+      ? { payment_confirmed_at: new Date().toISOString() }
+      : (mpData?.status === 'rejected' ? { payment_rejected_at: new Date().toISOString() } : {});
     await supabaseAdmin
       .from('orders')
-      .update({ payment_id: mpData?.id ? String(mpData.id) : null, payment_status: mpData?.status || 'pending' })
+      .update({
+        payment_id: mpData?.id ? String(mpData.id) : null,
+        payment_status: mpData?.status || 'pending',
+        status: mappedStatus,
+        ...statusTimestamps,
+        updated_at: new Date().toISOString()
+      })
       .eq('id', orderId);
 
     if (Array.isArray(items) && items.length > 0) {
@@ -464,6 +476,34 @@ router.post('/mp/process', async (req, res) => {
 
     const response = await mp.payment.create({ body }, { idempotencyKey });
     const data = response.body || response;
+    try {
+      const externalRef = req.body?.external_reference;
+      if (externalRef) {
+        const { data: foundOrder } = await supabaseAdmin
+          .from('orders')
+          .select('id')
+          .eq('external_reference', externalRef)
+          .maybeSingle();
+        if (foundOrder?.id) {
+          const mappedStatus = data?.status === 'approved'
+            ? 'pago'
+            : (data?.status === 'rejected' ? 'pagamento_rejeitado' : 'pendente');
+          const statusTimestamps = data?.status === 'approved'
+            ? { payment_confirmed_at: new Date().toISOString() }
+            : (data?.status === 'rejected' ? { payment_rejected_at: new Date().toISOString() } : {});
+          await supabaseAdmin
+            .from('orders')
+            .update({
+              payment_id: data?.id ? String(data.id) : null,
+              payment_status: data?.status || 'pending',
+              status: mappedStatus,
+              ...statusTimestamps,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', foundOrder.id);
+        }
+      }
+    } catch {}
     return res.status(200).json(data);
   } catch (error) {
     const mpError = error?.cause?.[0] || error?.response?.data;
