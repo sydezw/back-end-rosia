@@ -150,21 +150,24 @@ app.get('/api/payments/config', (req, res) => {
 
 app.get('/api/payments/methods', (req, res) => {
   console.log('🔓 Rota pública /api/payments/methods acessada');
-  // Endpoint público para buscar métodos de pagamento
+  req.url = '/methods';
   paymentsRoutes.handle(req, res, () => {});
 });
 
 // Endpoints públicos para o Brick criar token e processar pagamento
 app.post('/api/payments/mp/card-token', (req, res) => {
+  req.url = '/mp/card-token';
   paymentsRoutes.handle(req, res, () => {});
 });
 
 app.post('/api/payments/mp/credit-card', (req, res) => {
+  req.url = '/mp/credit-card';
   paymentsRoutes.handle(req, res, () => {});
 });
 
 // 🔓 Endpoint público para criar pagamento Pix (sem autenticação)
 app.post('/api/pix/create', (req, res) => {
+  req.url = '/mp/orders/pix';
   paymentsRoutes.handle(req, res, () => {});
 });
 
@@ -179,6 +182,7 @@ app.use('/api/payments/mp/process', (req, res, next) => {
 });
 
 app.post('/api/payments/mp/process', (req, res) => {
+  req.url = '/mp/process';
   paymentsRoutes.handle(req, res, () => {});
 });
 const corsOptionsForOrdersCard = {

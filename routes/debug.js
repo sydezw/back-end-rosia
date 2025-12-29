@@ -549,6 +549,87 @@ router.get('/test-auth-middleware', async (req, res) => {
   }
 });
 
+// Listar últimos pedidos (debug)
+router.get('/orders/recent', async (req, res) => {
+  try {
+    const { supabase } = require('../config/supabase');
+    const { data: orders, error } = await supabase
+      .from('orders')
+      .select('id,user_id,subtotal,shipping_cost,total,status,payment_method,payment_status,payment_id,items,shipping_address,created_at')
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+    res.json({ success: true, orders });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Listar últimos itens de pedidos (debug)
+router.get('/order-items/recent', async (req, res) => {
+  try {
+    const { supabase } = require('../config/supabase');
+    const { data: items, error } = await supabase
+      .from('order_items')
+      .select('id,order_id,product_id,quantity,unit_price,selected_size,selected_color,created_at')
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+    res.json({ success: true, items });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.post('/orders/backfill-items', async (req, res) => {
+  try {
+    const { supabaseAdmin } = require('../config/supabase');
+    const { data: orders, error: ordersErr } = await supabaseAdmin
+      .from('orders')
+      .select('id, user_id, created_at')
+      .is('items', null)
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (ordersErr) {
+      return res.status(500).json({ success: false, error: ordersErr.message });
+    }
+
+    const results = [];
+    for (const order of orders || []) {
+      const { data: rows, error: itemsErr } = await supabaseAdmin
+        .from('order_items')
+        .select('product_id, product_name, quantity, unit_price, selected_size, selected_color')
+        .eq('order_id', order.id);
+      if (itemsErr) {
+        results.push({ order_id: order.id, updated: false, error: itemsErr.message });
+        continue;
+      }
+      const items = (rows || []).map(r => ({
+        product_id: r.product_id,
+        product_name: r.product_name,
+        quantity: r.quantity,
+        product_price: Number(r.unit_price),
+        total: Number(r.unit_price) * Number(r.quantity),
+        size: r.selected_size || null,
+        color: r.selected_color || null
+      }));
+      const { error: updateErr } = await supabaseAdmin
+        .from('orders')
+        .update({ items })
+        .eq('id', order.id);
+      results.push({ order_id: order.id, updated: !updateErr, error: updateErr ? updateErr.message : null, items_count: items.length });
+    }
+
+    res.json({ success: true, processed: results.length, results });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 // Endpoint para obter estatísticas dos tokens invalidados
 router.get('/token-stats', (req, res) => {
   try {

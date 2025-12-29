@@ -118,12 +118,13 @@ router.post('/checkout', authenticateSupabaseGoogleUser, async (req, res, next) 
     const orderPayload = {
       id: orderId,
       user_id: supabaseAuthUserId,
+      items: orderItems,
       subtotal,
       shipping_cost: shippingCost,
       total,
       status: 'pendente',
-      payment_method,
-      shipping_address: shipping_address || null,
+      payment_method: payment_method === 'credit_card' ? 'cartao_credito' : payment_method,
+      shipping_address: shipping_address || {},
       created_at: new Date().toISOString()
     };
 

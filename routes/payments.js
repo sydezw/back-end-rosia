@@ -356,6 +356,25 @@ router.post('/process_payment', async (req, res) => {
       .update({ payment_id: mpData?.id ? String(mpData.id) : null, payment_status: mpData?.status || 'pending' })
       .eq('id', orderId);
 
+    if (Array.isArray(items) && items.length > 0) {
+      const itemsToInsert = items.map(it => ({
+        order_id: orderId,
+        product_id: it.product_id || it.productId,
+        quantity: Number(it.quantity || 1),
+        unit_price: Number(it.unit_price ?? it.product_price ?? it.price ?? total),
+        selected_size: it.selected_size ?? it.size ?? null,
+        selected_color: it.selected_color ?? it.color ?? null,
+        product_name: it.product_name || it.name || null
+      }));
+      try {
+        await supabaseAdmin
+          .from('order_items')
+          .insert(itemsToInsert);
+      } catch (itemsErr) {
+        console.error('Erro ao inserir order_items:', itemsErr);
+      }
+    }
+
     return res.status(201).json({
       status: mpData.status,
       status_detail: mpData.status_detail,
