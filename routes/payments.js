@@ -522,11 +522,60 @@ router.post('/mp/process', async (req, res) => {
             .update({
               payment_id: data?.id ? String(data.id) : null,
               payment_status: data?.status || 'pending',
+              payment_method: (paymentMethodId === 'pix') ? 'pix' : 'cartao_credito',
               status: mappedStatus,
               ...statusTimestamps,
               updated_at: new Date().toISOString()
             })
             .eq('id', foundOrder.id);
+
+          const rawItems = Array.isArray(req.body?.items)
+            ? req.body.items
+            : (Array.isArray(req.body?.additional_info?.items) ? req.body.additional_info.items : []);
+          const items = Array.isArray(rawItems) ? rawItems : [];
+          const shippingAddress = req.body?.shipping_address ?? {};
+          let subtotal = req.body?.subtotal != null ? Number(req.body.subtotal) : 0;
+          if ((subtotal == null || isNaN(subtotal)) && items.length > 0) {
+            subtotal = items.reduce((sum, it) => sum + Number(it.unit_price ?? it.product_price ?? it.price ?? 0) * Number(it.quantity ?? 1), 0);
+          }
+          const shipping_cost = req.body?.shipping_cost != null ? Number(req.body.shipping_cost) : 0;
+          const total = req.body?.transaction_amount != null
+            ? Number(Number(req.body.transaction_amount).toFixed(2))
+            : Number((subtotal + shipping_cost).toFixed(2));
+          await supabaseAdmin
+            .from('orders')
+            .update({ items, shipping_address: shippingAddress, subtotal, shipping_cost, total, updated_at: new Date().toISOString() })
+            .eq('id', foundOrder.id);
+
+          if (items.length > 0) {
+            const { data: existingItems } = await supabaseAdmin
+              .from('order_items')
+              .select('id')
+              .eq('order_id', foundOrder.id);
+            if (!existingItems || existingItems.length === 0) {
+              const productIds = [...new Set(items.map(it => it.product_id || it.productId).filter(Boolean))];
+              let productNameMap = {};
+              if (productIds.length > 0) {
+                const { data: prods } = await supabaseAdmin
+                  .from('products')
+                  .select('id,name')
+                  .in('id', productIds);
+                for (const p of prods || []) productNameMap[p.id] = p.name;
+              }
+              const itemsToInsert = items.map(it => ({
+                order_id: foundOrder.id,
+                product_id: it.product_id || it.productId,
+                quantity: Number(it.quantity || 1),
+                unit_price: Number(it.unit_price ?? it.product_price ?? it.price ?? total),
+                selected_size: it.selected_size ?? it.size ?? null,
+                selected_color: it.selected_color ?? it.color ?? null,
+                product_name: (it.product_name || it.name || (productNameMap[(it.product_id || it.productId)] ?? null))
+              }));
+              await supabaseAdmin
+                .from('order_items')
+                .insert(itemsToInsert);
+            }
+          }
         }
       }
     } catch {}
