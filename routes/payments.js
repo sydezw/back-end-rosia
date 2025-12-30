@@ -369,6 +369,22 @@ router.post('/process_payment', async (req, res) => {
       .eq('id', orderId);
 
     if (Array.isArray(items) && items.length > 0) {
+      const productIds = [...new Set(items.map(it => it.product_id || it.productId).filter(Boolean))];
+      let productNameMap = {};
+      if (productIds.length > 0) {
+        try {
+          const { data: prods } = await supabaseAdmin
+            .from('products')
+            .select('id,name')
+            .in('id', productIds);
+          if (Array.isArray(prods)) {
+            for (const p of prods) {
+              productNameMap[p.id] = p.name;
+            }
+          }
+        } catch {}
+      }
+
       const itemsToInsert = items.map(it => ({
         order_id: orderId,
         product_id: it.product_id || it.productId,
@@ -376,7 +392,7 @@ router.post('/process_payment', async (req, res) => {
         unit_price: Number(it.unit_price ?? it.product_price ?? it.price ?? total),
         selected_size: it.selected_size ?? it.size ?? null,
         selected_color: it.selected_color ?? it.color ?? null,
-        product_name: it.product_name || it.name || null
+        product_name: (it.product_name || it.name || (productNameMap[(it.product_id || it.productId)] ?? null))
       }));
       try {
         await supabaseAdmin
@@ -387,12 +403,22 @@ router.post('/process_payment', async (req, res) => {
       }
     }
 
+    let updatedOrder = createdOrder;
+    try {
+      const { data: freshOrder } = await supabaseAdmin
+        .from('orders')
+        .select('*')
+        .eq('id', orderId)
+        .maybeSingle();
+      if (freshOrder) updatedOrder = freshOrder;
+    } catch {}
+
     return res.status(201).json({
       status: mpData.status,
       status_detail: mpData.status_detail,
       id: mpData.id,
       external_reference: externalRef,
-      order: createdOrder
+      order: updatedOrder
     });
   } catch (error) {
     console.error('Erro ao processar:', error);
@@ -504,7 +530,21 @@ router.post('/mp/process', async (req, res) => {
         }
       }
     } catch {}
-    return res.status(200).json(data);
+    let respPayload = data;
+    try {
+      const externalRef = req.body?.external_reference;
+      let orderObj = null;
+      if (externalRef) {
+        const { data: foundOrder } = await supabaseAdmin
+          .from('orders')
+          .select('id,status,payment_status,external_reference')
+          .eq('external_reference', externalRef)
+          .maybeSingle();
+        if (foundOrder) orderObj = foundOrder;
+      }
+      respPayload = { status: data?.status, order: orderObj, ...data };
+    } catch {}
+    return res.status(200).json(respPayload);
   } catch (error) {
     const mpError = error?.cause?.[0] || error?.response?.data;
     return res.status(400).json({ error: mpError || { message: error.message } });

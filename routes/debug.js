@@ -585,6 +585,72 @@ router.get('/order-items/recent', async (req, res) => {
   }
 });
 
+// Backfill de product_name em order_items
+router.post('/order-items/backfill-product-name', async (req, res) => {
+  try {
+    const { supabaseAdmin } = require('../config/supabase');
+    const { data: items, error: itemsErr } = await supabaseAdmin
+      .from('order_items')
+      .select('id, order_id, product_id, product_name')
+      .is('product_name', null)
+      .limit(500);
+    if (itemsErr) {
+      return res.status(500).json({ success: false, error: itemsErr.message });
+    }
+    const productIds = [...new Set((items || []).map(i => i.product_id).filter(Boolean))];
+    let nameMap = {};
+    if (productIds.length > 0) {
+      const { data: prods } = await supabaseAdmin
+        .from('products')
+        .select('id,name')
+        .in('id', productIds);
+      for (const p of prods || []) nameMap[p.id] = p.name;
+    }
+    const updates = [];
+    for (const it of items || []) {
+      const name = nameMap[it.product_id] || null;
+      if (!name) {
+        updates.push({ id: it.id, updated: false, error: 'Nome não encontrado para product_id ' + it.product_id });
+        continue;
+      }
+      const { error: upErr } = await supabaseAdmin
+        .from('order_items')
+        .update({ product_name: name })
+        .eq('id', it.id);
+      updates.push({ id: it.id, updated: !upErr, error: upErr ? upErr.message : null });
+    }
+    res.json({ success: true, processed: updates.length, updates });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Backfill de external_reference em orders (usa id como referência)
+router.post('/orders/backfill-external-reference', async (req, res) => {
+  try {
+    const { supabaseAdmin } = require('../config/supabase');
+    const { data: orders, error } = await supabaseAdmin
+      .from('orders')
+      .select('id, external_reference')
+      .is('external_reference', null)
+      .limit(1000);
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+    const results = [];
+    for (const o of orders || []) {
+      const { error: upErr } = await supabaseAdmin
+        .from('orders')
+        .update({ external_reference: o.id })
+        .eq('id', o.id);
+      results.push({ id: o.id, updated: !upErr, error: upErr ? upErr.message : null });
+    }
+    res.json({ success: true, processed: results.length, results });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 router.post('/orders/backfill-items', async (req, res) => {
   try {
     const { supabaseAdmin } = require('../config/supabase');

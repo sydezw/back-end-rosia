@@ -125,6 +125,7 @@ router.post('/checkout', authenticateSupabaseGoogleUser, async (req, res, next) 
       status: 'pendente',
       payment_method: payment_method === 'credit_card' ? 'cartao_credito' : payment_method,
       shipping_address: shipping_address || {},
+      external_reference: orderId,
       created_at: new Date().toISOString()
     };
 
@@ -146,7 +147,8 @@ router.post('/checkout', authenticateSupabaseGoogleUser, async (req, res, next) 
       quantity: item.quantity,
       unit_price: item.product_price,
       selected_size: item.size,
-      selected_color: item.color
+      selected_color: item.color,
+      product_name: item.product_name
     }));
 
     const { error: itemsError } = await supabaseAdmin
