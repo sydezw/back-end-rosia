@@ -504,6 +504,16 @@ router.post('/mp/process', async (req, res) => {
     const data = response.body || response;
     try {
       const externalRef = req.body?.external_reference;
+      const bodyOrderId = req.body?.order_id || req.body?.orderId;
+      let supabaseUserId = req.body?.supabase_user_id || req.body?.user_id || null;
+      if (!supabaseUserId && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+        try {
+          const authToken = req.headers.authorization.slice(7);
+          const { data: { user } } = await supabaseAdmin.auth.getUser(authToken);
+          supabaseUserId = user?.id || null;
+        } catch {}
+      }
+      let targetOrderId = null;
       if (externalRef) {
         const { data: foundOrder } = await supabaseAdmin
           .from('orders')
@@ -511,6 +521,33 @@ router.post('/mp/process', async (req, res) => {
           .eq('external_reference', externalRef)
           .maybeSingle();
         if (foundOrder?.id) {
+          targetOrderId = foundOrder.id;
+        }
+      }
+      if (!targetOrderId && bodyOrderId) {
+        const { data: orderById } = await supabaseAdmin
+          .from('orders')
+          .select('id')
+          .eq('id', bodyOrderId)
+          .maybeSingle();
+        if (orderById?.id) {
+          targetOrderId = orderById.id;
+        }
+      }
+      if (!targetOrderId && supabaseUserId) {
+        const { data: recentOrder } = await supabaseAdmin
+          .from('orders')
+          .select('id, created_at, status')
+          .eq('user_id', supabaseUserId)
+          .eq('status', 'pendente')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (recentOrder?.id) {
+          targetOrderId = recentOrder.id;
+        }
+      }
+      if (targetOrderId) {
           const mappedStatus = data?.status === 'approved'
             ? 'pago'
             : (data?.status === 'rejected' ? 'pagamento_rejeitado' : 'pendente');
@@ -527,7 +564,7 @@ router.post('/mp/process', async (req, res) => {
               ...statusTimestamps,
               updated_at: new Date().toISOString()
             })
-            .eq('id', foundOrder.id);
+            .eq('id', targetOrderId);
 
           const rawItems = Array.isArray(req.body?.items)
             ? req.body.items
@@ -545,13 +582,13 @@ router.post('/mp/process', async (req, res) => {
           await supabaseAdmin
             .from('orders')
             .update({ items, shipping_address: shippingAddress, subtotal, shipping_cost, total, updated_at: new Date().toISOString() })
-            .eq('id', foundOrder.id);
+            .eq('id', targetOrderId);
 
           if (items.length > 0) {
             const { data: existingItems } = await supabaseAdmin
               .from('order_items')
               .select('id')
-              .eq('order_id', foundOrder.id);
+              .eq('order_id', targetOrderId);
             if (!existingItems || existingItems.length === 0) {
               const productIds = [...new Set(items.map(it => it.product_id || it.productId).filter(Boolean))];
               let productNameMap = {};
@@ -563,7 +600,7 @@ router.post('/mp/process', async (req, res) => {
                 for (const p of prods || []) productNameMap[p.id] = p.name;
               }
               const itemsToInsert = items.map(it => ({
-                order_id: foundOrder.id,
+                order_id: targetOrderId,
                 product_id: it.product_id || it.productId,
                 quantity: Number(it.quantity || 1),
                 unit_price: Number(it.unit_price ?? it.product_price ?? it.price ?? total),
@@ -576,7 +613,6 @@ router.post('/mp/process', async (req, res) => {
                 .insert(itemsToInsert);
             }
           }
-        }
       }
     } catch {}
     let respPayload = data;
