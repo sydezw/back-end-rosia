@@ -102,6 +102,50 @@ router.post('/payment', async (req, res, next) => {
     next(error);
   }
 });
+router.post('/payment.', async (req, res) => {
+  try {
+    const payload = Buffer.isBuffer(req.body)
+      ? JSON.parse(req.body.toString('utf8'))
+      : (typeof req.body === 'string' ? JSON.parse(req.body) : req.body);
+    return await handleMercadoPagoWebhook(payload, res);
+  } catch {
+    return res.status(200).send('OK');
+  }
+});
+router.get('/payment', async (req, res) => {
+  try {
+    const id = req.query?.id || req.query?.data_id || req.query?.data?.id;
+    if (!id) return res.status(200).send('OK');
+    let paymentData;
+    try {
+      const paymentRes = await mpPayment.get({ id: String(id) });
+      paymentData = paymentRes.body || paymentRes;
+    } catch {
+      return res.status(200).send('Pagamento não encontrado');
+    }
+    const orderId = paymentData.external_reference;
+    if (!orderId) return res.status(200).send('Sem referência');
+    const { data: order } = await supabaseAdmin
+      .from('orders')
+      .select('id')
+      .eq('external_reference', orderId)
+      .maybeSingle();
+    if (!order?.id) return res.status(200).send('Pedido não encontrado');
+    await supabaseAdmin
+      .from('orders')
+      .update({
+        status: paymentData.status === 'approved' ? 'pago' : (paymentData.status === 'rejected' ? 'pagamento_rejeitado' : 'pendente'),
+        payment_id: String(id),
+        payment_status: paymentData.status,
+        payment_data: paymentData,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', order.id);
+    return res.status(200).send('OK');
+  } catch {
+    return res.status(200).send('OK');
+  }
+});
 
 router.post('/mercadopago', async (req, res) => {
   try {
@@ -184,7 +228,7 @@ router.post('/shipping', async (req, res, next) => {
       updateData.estimated_delivery = estimated_delivery;
     }
 
-    const { data: updatedOrder, error } = await supabase
+    const { data: updatedOrder, error } = await supabaseAdmin
       .from('orders')
       .update(updateData)
       .eq('id', order_id)
@@ -253,7 +297,7 @@ function extractOrderId(webhookData) {
  */
 async function handlePaymentApproved(orderId, webhookData) {
   try {
-    const { data: order, error: fetchError } = await supabase
+    const { data: order, error: fetchError } = await supabaseAdmin
       .from('orders')
       .select('*')
       .eq('id', orderId)
@@ -269,7 +313,7 @@ async function handlePaymentApproved(orderId, webhookData) {
     }
 
     // Atualizar status do pedido
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseAdmin
       .from('orders')
       .update({
         status: 'pago',
@@ -295,7 +339,7 @@ async function handlePaymentApproved(orderId, webhookData) {
  */
 async function handlePaymentRejected(orderId, webhookData) {
   try {
-    const { data: order, error: fetchError } = await supabase
+    const { data: order, error: fetchError } = await supabaseAdmin
       .from('orders')
       .select('*')
       .eq('id', orderId)
@@ -306,7 +350,7 @@ async function handlePaymentRejected(orderId, webhookData) {
     }
 
     // Atualizar status do pedido
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseAdmin
       .from('orders')
       .update({
         status: 'pagamento_rejeitado',
@@ -324,14 +368,14 @@ async function handlePaymentRejected(orderId, webhookData) {
     if (order.items && Array.isArray(order.items)) {
       for (const item of order.items) {
         if (item.product_id && item.quantity) {
-          const { data: product } = await supabase
+          const { data: product } = await supabaseAdmin
             .from('products')
             .select('stock')
             .eq('id', item.product_id)
             .single();
 
           if (product) {
-            await supabase
+            await supabaseAdmin
               .from('products')
               .update({ stock: product.stock + item.quantity })
               .eq('id', item.product_id);
@@ -352,7 +396,7 @@ async function handlePaymentRejected(orderId, webhookData) {
  */
 async function handlePaymentRefunded(orderId, webhookData) {
   try {
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseAdmin
       .from('orders')
       .update({
         status: 'reembolsado',
@@ -400,7 +444,7 @@ async function handleMercadoPagoWebhook(webhookData, res) {
     let attempts = 0;
     const maxAttempts = 6;
     while (!order && attempts < maxAttempts) {
-      const { data } = await supabase
+      const { data } = await supabaseAdmin
         .from('orders')
         .select('id')
         .eq('external_reference', orderId)
@@ -419,7 +463,7 @@ async function handleMercadoPagoWebhook(webhookData, res) {
       return res.status(200).send('Pedido não encontrado no banco de dados');
     }
 
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseAdmin
       .from('orders')
       .update({
         status: paymentData.status === 'approved' ? 'pago' :
