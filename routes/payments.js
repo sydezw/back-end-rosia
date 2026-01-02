@@ -332,31 +332,97 @@ router.post('/process_payment', async (req, res) => {
       return res.status(400).json({ error: 'user_id obrigatório' });
     }
 
-    const orderId = uuidv4();
-    const orderPayload = {
-      id: orderId,
-      user_id: supabaseUserId,
-      external_reference: externalRef,
-      items,
-      subtotal,
-      shipping_cost,
-      total,
-      status: 'pendente',
-      payment_method: (paymentMethodId === 'pix') ? 'pix' : 'cartao_credito',
-      payment_status: 'pending',
-      shipping_address: shippingAddress,
-      updated_at: new Date().toISOString(),
-      created_at: new Date().toISOString()
-    };
+    const bodyOrderId = req.body?.order_id || req.body?.orderId;
+    let targetOrderId = null;
+    if (externalRef) {
+      try {
+        const { data: foundOrder } = await supabaseAdmin
+          .from('orders')
+          .select('id,status')
+          .eq('external_reference', externalRef)
+          .maybeSingle();
+        if (foundOrder?.id) targetOrderId = foundOrder.id;
+      } catch {}
+    }
+    if (!targetOrderId && bodyOrderId) {
+      try {
+        const { data: orderById } = await supabaseAdmin
+          .from('orders')
+          .select('id,status')
+          .eq('id', bodyOrderId)
+          .maybeSingle();
+        if (orderById?.id) targetOrderId = orderById.id;
+      } catch {}
+    }
 
-    const { data: createdOrder, error: insertError } = await supabaseAdmin
-      .from('orders')
-      .insert([orderPayload])
-      .select()
-      .single();
+    if (!targetOrderId) {
+      // Fallback: reutilizar pedido mais recente pendente do usuário
+      if (supabaseUserId) {
+        try {
+          const { data: recentPending } = await supabaseAdmin
+            .from('orders')
+            .select('id, external_reference, created_at')
+            .eq('user_id', supabaseUserId)
+            .eq('status', 'pendente')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (recentPending?.id) {
+            targetOrderId = recentPending.id;
+            // Se já existe um external_reference, o mantenha para o pagamento
+            if (!req.body?.external_reference && recentPending.external_reference) {
+              externalRef = recentPending.external_reference;
+            }
+          }
+        } catch {}
+      }
+    }
 
-    if (insertError || !createdOrder) {
-      return res.status(500).json({ error: 'Falha ao criar pedido antes de processar pagamento' });
+    if (!targetOrderId) {
+      targetOrderId = uuidv4();
+      const orderPayload = {
+        id: targetOrderId,
+        user_id: supabaseUserId,
+        external_reference: externalRef,
+        items,
+        subtotal,
+        shipping_cost,
+        total,
+        status: 'pendente',
+        payment_method: (paymentMethodId === 'pix') ? 'pix' : 'cartao_credito',
+        payment_status: 'pending',
+        shipping_address: shippingAddress,
+        updated_at: new Date().toISOString(),
+        created_at: new Date().toISOString()
+      };
+
+      const { data: createdOrder, error: insertError } = await supabaseAdmin
+        .from('orders')
+        .insert([orderPayload])
+        .select()
+        .single();
+
+      if (insertError || !createdOrder) {
+        return res.status(500).json({ error: 'Falha ao criar pedido antes de processar pagamento' });
+      }
+    } else {
+      try {
+        await supabaseAdmin
+          .from('orders')
+          .update({
+            user_id: supabaseUserId,
+            items,
+            subtotal,
+            shipping_cost,
+            total,
+            status: 'pendente',
+            payment_method: (paymentMethodId === 'pix') ? 'pix' : 'cartao_credito',
+            payment_status: 'pending',
+            shipping_address: shippingAddress,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', targetOrderId);
+      } catch {}
     }
 
     const normalizedMethod2 = typeof paymentMethodId === 'string' ? paymentMethodId.toLowerCase() : paymentMethodId;
@@ -413,7 +479,7 @@ router.post('/process_payment', async (req, res) => {
         ...statusTimestamps,
         updated_at: new Date().toISOString()
       })
-      .eq('id', orderId);
+      .eq('id', targetOrderId);
 
     if (Array.isArray(items) && items.length > 0) {
       const productIds = [...new Set(items.map(it => it.product_id || it.productId).filter(Boolean))];
@@ -433,7 +499,7 @@ router.post('/process_payment', async (req, res) => {
       }
 
       const itemsToInsert = items.map(it => ({
-        order_id: orderId,
+        order_id: targetOrderId,
         product_id: it.product_id || it.productId,
         quantity: Number(it.quantity || 1),
         unit_price: Number(it.unit_price ?? it.product_price ?? it.price ?? total),
@@ -442,20 +508,26 @@ router.post('/process_payment', async (req, res) => {
         product_name: (it.product_name || it.name || (productNameMap[(it.product_id || it.productId)] ?? null))
       }));
       try {
-        await supabaseAdmin
+        const { data: existingItems } = await supabaseAdmin
           .from('order_items')
-          .insert(itemsToInsert);
+          .select('id')
+          .eq('order_id', targetOrderId);
+        if (!existingItems || existingItems.length === 0) {
+          await supabaseAdmin
+            .from('order_items')
+            .insert(itemsToInsert);
+        }
       } catch (itemsErr) {
-        console.error('Erro ao inserir order_items:', itemsErr);
+        console.error('Erro ao inserir/validar order_items:', itemsErr);
       }
     }
 
-    let updatedOrder = createdOrder;
+    let updatedOrder = null;
     try {
       const { data: freshOrder } = await supabaseAdmin
         .from('orders')
         .select('*')
-        .eq('id', orderId)
+        .eq('id', targetOrderId)
         .maybeSingle();
       if (freshOrder) updatedOrder = freshOrder;
     } catch {}
@@ -825,33 +897,108 @@ router.post('/process-card', async (req, res) => {
       ? Number(Number(req.body.transaction_amount).toFixed(2))
       : (subtotal != null ? Number((subtotal + shipping_cost).toFixed(2)) : undefined);
 
-    const externalRef = req.body?.external_reference || `ORDER-${Date.now()}`;
+    let externalRef = req.body?.external_reference || null;
+    const bodyOrderId = req.body?.order_id || req.body?.orderId;
 
-    const orderPayload = {
-      id: uuidv4(),
-      user_id: req.body?.supabase_user_id || req.body?.user_id || req.body?.google_user_profile_id,
-      external_reference: externalRef,
-      subtotal,
-      shipping_cost,
-      total,
-      status: 'pendente',
-      payment_method: req.body?.payment_method_id || 'credit_card',
-      payment_status: 'pending',
-      shipping_address: req.body?.shipping_address || null,
-      updated_at: new Date().toISOString(),
-      created_at: new Date().toISOString()
-    };
+    let supabaseUserId = req.body?.supabase_user_id || req.body?.user_id || req.user?.id || null;
+    if (!supabaseUserId && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+      try {
+        const authToken = req.headers.authorization.slice(7);
+        const { data: { user } } = await supabaseAdmin.auth.getUser(authToken);
+        supabaseUserId = user?.id || null;
+      } catch {}
+    }
+    if (!supabaseUserId) {
+      return res.status(400).json({ error: 'user_id obrigatório' });
+    }
 
-    let createdOrder = null;
-    try {
-      const { data: orderInserted } = await supabaseAdmin
+    let targetOrderId = null;
+    if (externalRef) {
+      try {
+        const { data: foundOrder } = await supabaseAdmin
+          .from('orders')
+          .select('id,status')
+          .eq('external_reference', externalRef)
+          .maybeSingle();
+        if (foundOrder?.id) targetOrderId = foundOrder.id;
+      } catch {}
+    }
+    if (!targetOrderId && bodyOrderId) {
+      try {
+        const { data: orderById } = await supabaseAdmin
+          .from('orders')
+          .select('id,status')
+          .eq('id', bodyOrderId)
+          .maybeSingle();
+        if (orderById?.id) targetOrderId = orderById.id;
+      } catch {}
+    }
+    if (!targetOrderId && supabaseUserId) {
+      try {
+        const { data: recentPending } = await supabaseAdmin
+          .from('orders')
+          .select('id, external_reference, created_at')
+          .eq('user_id', supabaseUserId)
+          .eq('status', 'pendente')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (recentPending?.id) {
+          targetOrderId = recentPending.id;
+          if (!externalRef && recentPending.external_reference) externalRef = recentPending.external_reference;
+        }
+      } catch {}
+    }
+
+    if (!externalRef) externalRef = `ORDER-${Date.now()}`;
+
+    const rawItems = Array.isArray(req.body?.items)
+      ? req.body.items
+      : (Array.isArray(req.body?.additional_info?.items) ? req.body.additional_info.items : []);
+    const items = Array.isArray(rawItems) ? rawItems : [];
+    const shippingAddress = req.body?.shipping_address || null;
+
+    if (!targetOrderId) {
+      targetOrderId = uuidv4();
+      const orderPayload = {
+        id: targetOrderId,
+        user_id: supabaseUserId,
+        external_reference: externalRef,
+        subtotal,
+        shipping_cost,
+        total,
+        status: 'pendente',
+        payment_method: req.body?.payment_method_id || 'credit_card',
+        payment_status: 'pending',
+        shipping_address: shippingAddress,
+        updated_at: new Date().toISOString(),
+        created_at: new Date().toISOString()
+      };
+      const { data: createdOrder, error: insertError } = await supabaseAdmin
         .from('orders')
         .insert([orderPayload])
         .select()
-        .maybeSingle();
-      createdOrder = orderInserted || null;
-    } catch (insertError) {
-      console.error('Erro ao inserir pedido:', insertError);
+        .single();
+      if (insertError || !createdOrder) {
+        return res.status(500).json({ error: 'Falha ao criar pedido antes do pagamento' });
+      }
+    } else {
+      try {
+        await supabaseAdmin
+          .from('orders')
+          .update({
+            user_id: supabaseUserId,
+            subtotal,
+            shipping_cost,
+            total,
+            status: 'pendente',
+            payment_method: req.body?.payment_method_id || 'credit_card',
+            payment_status: 'pending',
+            shipping_address: shippingAddress,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', targetOrderId);
+      } catch {}
     }
 
     const body = {
@@ -860,7 +1007,6 @@ router.post('/process-card', async (req, res) => {
       binary_mode: req.body?.binary_mode === undefined ? true : !!req.body.binary_mode,
       notification_url: `${process.env.BACKEND_URL || 'https://back-end-rosia02.vercel.app'}/webhook/payment`
     };
-
     if (body?.transaction_amount != null && !isNaN(Number(body.transaction_amount))) {
       body.transaction_amount = Number(Number(body.transaction_amount).toFixed(2));
     }
@@ -871,9 +1017,49 @@ router.post('/process-card', async (req, res) => {
     await supabaseAdmin
       .from('orders')
       .update({ payment_id: data?.id ? String(data.id) : null, payment_status: data?.status || 'pending' })
-      .eq('id', orderPayload.id);
+      .eq('id', targetOrderId);
 
-    return res.json({ ...data, order: createdOrder });
+    if (items.length > 0) {
+      const { data: existingItems } = await supabaseAdmin
+        .from('order_items')
+        .select('id')
+        .eq('order_id', targetOrderId);
+      if (!existingItems || existingItems.length === 0) {
+        const productIds = [...new Set(items.map(it => it.product_id || it.productId).filter(Boolean))];
+        let productNameMap = {};
+        if (productIds.length > 0) {
+          const { data: prods } = await supabaseAdmin
+            .from('products')
+            .select('id,name')
+            .in('id', productIds);
+          for (const p of prods || []) productNameMap[p.id] = p.name;
+        }
+        const itemsToInsert = items.map(it => ({
+          order_id: targetOrderId,
+          product_id: it.product_id || it.productId,
+          quantity: Number(it.quantity || 1),
+          unit_price: Number(it.unit_price ?? it.product_price ?? it.price ?? total),
+          selected_size: it.selected_size ?? it.size ?? null,
+          selected_color: it.selected_color ?? it.color ?? null,
+          product_name: (it.product_name || it.name || (productNameMap[(it.product_id || it.productId)] ?? null))
+        }));
+        await supabaseAdmin
+          .from('order_items')
+          .insert(itemsToInsert);
+      }
+    }
+
+    let updatedOrder = null;
+    try {
+      const { data: freshOrder } = await supabaseAdmin
+        .from('orders')
+        .select('*')
+        .eq('id', targetOrderId)
+        .maybeSingle();
+      if (freshOrder) updatedOrder = freshOrder;
+    } catch {}
+
+    return res.json({ ...data, order: updatedOrder });
   } catch (err) {
     const mpError = err?.cause?.[0] || err?.response?.data;
     console.log(err);
