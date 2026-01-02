@@ -314,6 +314,12 @@ router.post('/process_payment', async (req, res) => {
     const items = Array.isArray(rawItems) ? rawItems : [];
 
     let supabaseUserId = req.body?.supabase_user_id || req.body?.user_id || req.user?.id || null;
+    console.log('process_payment user resolve', {
+      body_user_id: req.body?.user_id,
+      supabase_user_id: req.body?.supabase_user_id,
+      req_user_id: req.user?.id,
+      hasAuthorization: !!req.headers.authorization
+    });
     if (!supabaseUserId && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
       try {
         const authToken = req.headers.authorization.slice(7);
@@ -321,6 +327,7 @@ router.post('/process_payment', async (req, res) => {
         supabaseUserId = user?.id || null;
       } catch {}
     }
+    console.log('process_payment resolved user_id:', supabaseUserId);
     if (!supabaseUserId) {
       return res.status(400).json({ error: 'user_id obrigatório' });
     }
