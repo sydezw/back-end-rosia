@@ -313,7 +313,7 @@ router.post('/process_payment', async (req, res) => {
       : (Array.isArray(req.body?.additional_info?.items) ? req.body.additional_info.items : []);
     const items = Array.isArray(rawItems) ? rawItems : [];
 
-    let supabaseUserId = req.body?.supabase_user_id || req.body?.user_id || null;
+    let supabaseUserId = req.body?.supabase_user_id || req.body?.user_id || req.user?.id || null;
     if (!supabaseUserId && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
       try {
         const authToken = req.headers.authorization.slice(7);
@@ -569,7 +569,7 @@ router.post('/mp/process', async (req, res) => {
     try {
       const externalRef = req.body?.external_reference;
       const bodyOrderId = req.body?.order_id || req.body?.orderId;
-      let supabaseUserId = req.body?.supabase_user_id || req.body?.user_id || null;
+      let supabaseUserId = req.body?.supabase_user_id || req.body?.user_id || req.user?.id || null;
       if (!supabaseUserId && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
         try {
           const authToken = req.headers.authorization.slice(7);
