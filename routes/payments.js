@@ -66,24 +66,58 @@ router.post('/mp/credit-card', async (req, res, next) => {
 
     const mercadoPago = getMercadoPago();
 
+    const normalizedMethod = typeof payment_method_id === 'string' ? payment_method_id.toLowerCase() : payment_method_id;
     const body = {
       transaction_amount: Number(Number(amount).toFixed(2)),
       token,
       description: description || 'Compra na sua loja',
       installments: Number(installments) || 1,
-      payment_method_id,
-      issuer_id,
-      payer: { 
+      payment_method_id: normalizedMethod,
+      payer: {
         email,
         identification: cpf ? { type: 'CPF', number: cpf } : undefined
       }
     };
+    if (issuer_id !== undefined && issuer_id !== null && String(issuer_id).trim() !== '') {
+      body.issuer_id = issuer_id;
+    }
 
-    // SDK v2: Payment.create({ body })
-    const payment = await mercadoPago.payment.create({ body });
-
-    const mp = payment.body || payment;
-
+    let mp;
+    try {
+      const payment = await mercadoPago.payment.create({ body });
+      mp = payment.body || payment;
+    } catch (errFirst) {
+      if (body.issuer_id) {
+        const retryBody = { ...body };
+        delete retryBody.issuer_id;
+        try {
+          const retry = await mercadoPago.payment.create({ body: retryBody });
+          mp = retry.body || retry;
+        } catch (errRetry) {
+          const mpError2 = errRetry?.cause?.[0];
+          if (mpError2) {
+            return res.status(400).json({
+              success: false,
+              error: 'Erro no processamento do pagamento',
+              code: mpError2.code,
+              description: mpError2.description
+            });
+          }
+          return res.status(400).json({ success: false, error: errRetry.message || 'Erro desconhecido' });
+        }
+      } else {
+        const mpError1 = errFirst?.cause?.[0];
+        if (mpError1) {
+          return res.status(400).json({
+            success: false,
+            error: 'Erro no processamento do pagamento',
+            code: mpError1.code,
+            description: mpError1.description
+          });
+        }
+        return res.status(400).json({ success: false, error: errFirst.message || 'Erro desconhecido' });
+      }
+    }
     return res.json({
       success: true,
       status: mp.status,
@@ -94,21 +128,11 @@ router.post('/mp/credit-card', async (req, res, next) => {
     });
 
   } catch (e) {
-    // Normalizar erros do MP
     const mpError = e?.cause?.[0];
     if (mpError) {
-      return res.status(400).json({
-        success: false,
-        error: 'Erro no processamento do pagamento',
-        code: mpError.code,
-        description: mpError.description
-      });
+      return res.status(400).json({ success: false, error: 'Erro no processamento do pagamento', code: mpError.code, description: mpError.description });
     }
-
-    return res.status(400).json({
-      success: false,
-      error: e.message || 'Erro desconhecido'
-    });
+    return res.status(400).json({ success: false, error: e.message || 'Erro desconhecido' });
   }
 });
 
@@ -328,13 +352,13 @@ router.post('/process_payment', async (req, res) => {
       return res.status(500).json({ error: 'Falha ao criar pedido antes de processar pagamento' });
     }
 
+    const normalizedMethod2 = typeof paymentMethodId === 'string' ? paymentMethodId.toLowerCase() : paymentMethodId;
     const body = {
       transaction_amount: Number(total),
       token,
       description: req.body?.description || 'Pagamento',
       installments,
-      payment_method_id: paymentMethodId,
-      issuer_id: issuerId,
+      payment_method_id: normalizedMethod2,
       payer,
       external_reference: externalRef,
       binary_mode: req.body?.binary_mode === undefined ? true : !!req.body.binary_mode,
@@ -342,13 +366,29 @@ router.post('/process_payment', async (req, res) => {
       notification_url: `${process.env.BACKEND_URL || 'https://back-end-rosia02.vercel.app'}/webhook/payment`,
       additional_info: req.body?.additional_info
     };
+    if (issuerId !== undefined && issuerId !== null && String(issuerId).trim() !== '') {
+      body.issuer_id = issuerId;
+    }
 
     let mpData;
     try {
       const resp = await mp.payment.create({ body }, { idempotencyKey });
       mpData = resp.body || resp;
-    } catch (e) {
-      return res.status(400).json({ error: 'Erro ao processar com Mercado Pago' });
+    } catch (e1) {
+      if (body.issuer_id) {
+        const retryBody = { ...body };
+        delete retryBody.issuer_id;
+        try {
+          const retryResp = await mp.payment.create({ body: retryBody }, { idempotencyKey });
+          mpData = retryResp.body || retryResp;
+        } catch (e2) {
+          const mpError2 = e2?.cause?.[0] || e2?.response?.data;
+          return res.status(400).json({ error: mpError2 || { message: e2.message } });
+        }
+      } else {
+        const mpError1 = e1?.cause?.[0] || e1?.response?.data;
+        return res.status(400).json({ error: mpError1 || { message: e1.message } });
+      }
     }
 
     const mappedStatus = mpData?.status === 'approved'
@@ -434,6 +474,10 @@ router.post('/mp/process', async (req, res) => {
     if (!accessToken) {
       return res.status(500).json({ error: 'Token de acesso do Mercado Pago não configurado' });
     }
+    try {
+      const tokenPrefix = typeof accessToken === 'string' ? accessToken.split('-')[0] : null;
+      console.log('MP token prefix:', tokenPrefix);
+    } catch {}
 
     const mp = getMercadoPago();
 
@@ -491,7 +535,6 @@ router.post('/mp/process', async (req, res) => {
       description: req.body?.description || 'Pagamento',
       installments,
       payment_method_id: paymentMethodId,
-      issuer_id: issuerId,
       payer,
       external_reference: req.body?.external_reference,
       binary_mode: req.body?.binary_mode === undefined ? true : !!req.body.binary_mode,
@@ -499,9 +542,30 @@ router.post('/mp/process', async (req, res) => {
       notification_url: `${process.env.BACKEND_URL || 'https://back-end-rosia02.vercel.app'}/webhook/payment`,
       additional_info: req.body?.additional_info
     };
+    if (issuerId !== undefined && issuerId !== null && String(issuerId).trim() !== '') {
+      body.issuer_id = issuerId;
+    }
 
-    const response = await mp.payment.create({ body }, { idempotencyKey });
-    const data = response.body || response;
+    let data;
+    try {
+      const response = await mp.payment.create({ body }, { idempotencyKey });
+      data = response.body || response;
+    } catch (err1) {
+      if (body.issuer_id) {
+        const retryBody = { ...body };
+        delete retryBody.issuer_id;
+        try {
+          const retryResp = await mp.payment.create({ body: retryBody }, { idempotencyKey });
+          data = retryResp.body || retryResp;
+        } catch (err2) {
+          const mpError2 = err2?.cause?.[0] || err2?.response?.data;
+          return res.status(400).json({ error: mpError2 || { message: err2.message } });
+        }
+      } else {
+        const mpError1 = err1?.cause?.[0] || err1?.response?.data;
+        return res.status(400).json({ error: mpError1 || { message: err1.message } });
+      }
+    }
     try {
       const externalRef = req.body?.external_reference;
       const bodyOrderId = req.body?.order_id || req.body?.orderId;
@@ -511,7 +575,7 @@ router.post('/mp/process', async (req, res) => {
           const authToken = req.headers.authorization.slice(7);
           const { data: { user } } = await supabaseAdmin.auth.getUser(authToken);
           supabaseUserId = user?.id || null;
-        } catch {}
+        } catch (e) { console.warn('Falha ao obter usuário do Supabase pelo Bearer'); }
       }
       let targetOrderId = null;
       if (externalRef) {
@@ -613,6 +677,8 @@ router.post('/mp/process', async (req, res) => {
                 .insert(itemsToInsert);
             }
           }
+      } else {
+        console.warn('Nenhum pedido associado encontrado para o pagamento');
       }
     } catch {}
     let respPayload = data;
@@ -631,8 +697,17 @@ router.post('/mp/process', async (req, res) => {
     } catch {}
     return res.status(200).json(respPayload);
   } catch (error) {
+    try {
+      console.error('ERRO DETALHADO /mp/process:', error?.response?.data || error);
+    } catch {}
     const mpError = error?.cause?.[0] || error?.response?.data;
-    return res.status(400).json({ error: mpError || { message: error.message } });
+    const message = (typeof mpError === 'string' ? mpError : mpError?.message) || error.message;
+    const statusCode = (message === 'internal_error' || (error?.response?.status && error.response.status >= 500)) ? 500 : 400;
+    return res.status(statusCode).json({
+      error: message === 'internal_error' ? 'internal_error' : 'processing_error',
+      debug: error.message,
+      detail: mpError
+    });
   }
 });
 
