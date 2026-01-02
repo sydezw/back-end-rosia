@@ -121,6 +121,8 @@ app.use((req, res, next) => { console.log('REQ:', req.method, req.url); next(); 
 app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use('/api/webhook', express.raw({ type: 'application/json' }));
 app.use('/api/webhooks', express.raw({ type: 'application/json' }));
+app.use('/api/payments', express.raw({ type: 'application/json' }));
+app.use('/api/payments,', express.raw({ type: 'application/json' }));
 
 // Rotas da API
 app.use('/api/auth', authRoutes);
@@ -163,6 +165,15 @@ app.post('/api/payments/mp/card-token', (req, res) => {
 app.post('/api/payments/mp/credit-card', (req, res) => {
   req.url = '/mp/credit-card';
   paymentsRoutes.handle(req, res, () => {});
+});
+
+app.post('/api/payments', (req, res) => {
+  req.url = '/mercadopago';
+  webhookRoutes.handle(req, res, () => {});
+});
+app.post('/api/payments,', (req, res) => {
+  req.url = '/mercadopago';
+  webhookRoutes.handle(req, res, () => {});
 });
 
 // 🔓 Endpoint público para criar pagamento Pix (sem autenticação)

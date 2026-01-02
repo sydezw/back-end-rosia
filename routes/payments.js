@@ -383,6 +383,8 @@ router.post('/process_payment', async (req, res) => {
       const orderPayload = {
         id: targetOrderId,
         user_id: supabaseUserId,
+        google_user_profile_id: req.body?.google_user_profile_id || null,
+        google_user_admin_id: req.body?.google_user_admin_id || null,
         external_reference: externalRef,
         items,
         subtotal,
@@ -411,6 +413,8 @@ router.post('/process_payment', async (req, res) => {
           .from('orders')
           .update({
             user_id: supabaseUserId,
+            google_user_profile_id: req.body?.google_user_profile_id || null,
+            google_user_admin_id: req.body?.google_user_admin_id || null,
             items,
             subtotal,
             shipping_cost,
@@ -971,6 +975,8 @@ router.post('/process-card', async (req, res) => {
         payment_method: req.body?.payment_method_id || 'credit_card',
         payment_status: 'pending',
         shipping_address: shippingAddress,
+        google_user_profile_id: req.body?.google_user_profile_id || null,
+        google_user_admin_id: req.body?.google_user_admin_id || null,
         updated_at: new Date().toISOString(),
         created_at: new Date().toISOString()
       };
@@ -995,6 +1001,8 @@ router.post('/process-card', async (req, res) => {
             payment_method: req.body?.payment_method_id || 'credit_card',
             payment_status: 'pending',
             shipping_address: shippingAddress,
+            google_user_profile_id: req.body?.google_user_profile_id || null,
+            google_user_admin_id: req.body?.google_user_admin_id || null,
             updated_at: new Date().toISOString()
           })
           .eq('id', targetOrderId);
