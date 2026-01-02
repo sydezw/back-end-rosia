@@ -1,5 +1,5 @@
 const express = require('express');
-const { supabase } = require('../config/supabase');
+const { supabase, supabaseAdmin } = require('../config/supabase');
 const router = express.Router();
 
 /**
@@ -268,6 +268,152 @@ router.get('/status/summary', async (req, res, next) => {
     }, {});
 
     res.json({ summary });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:id/tracking', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.userId;
+    const { data: order, error } = await supabase
+      .from('orders')
+      .select('id,status,tracking_code,estimated_delivery,updated_at,created_at')
+      .eq('user_id', userId)
+      .or(`id.eq.${id},external_reference.eq.${id}`)
+      .maybeSingle();
+    if (error || !order) {
+      return res.status(404).json({ error: 'Pedido não encontrado', code: 'ORDER_NOT_FOUND' });
+    }
+    return res.json({
+      tracking: {
+        order_id: order.id,
+        status: order.status,
+        tracking_code: order.tracking_code || null,
+        estimated_delivery: order.estimated_delivery || null,
+        updated_at: order.updated_at,
+        created_at: order.created_at
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/:id/reorder', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.userId;
+    const { data: order, error: orderErr } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('id', id)
+      .single();
+    if (orderErr || !order) {
+      return res.status(404).json({ error: 'Pedido não encontrado', code: 'ORDER_NOT_FOUND' });
+    }
+    let items = Array.isArray(order.items) ? order.items : [];
+    if (!items || items.length === 0) {
+      const { data: orderItems } = await supabase
+        .from('order_items')
+        .select('*')
+        .eq('order_id', order.id);
+      items = (orderItems || []).map(it => ({
+        product_id: it.product_id,
+        quantity: it.quantity,
+        unit_price: Number(it.unit_price),
+        selected_size: it.selected_size || null,
+        selected_color: it.selected_color || null
+      }));
+    }
+    const { data: existingCart } = await supabaseAdmin
+      .from('carts')
+      .select('id')
+      .eq('user_id', userId)
+      .maybeSingle();
+    let cartId = existingCart?.id;
+    if (!cartId) {
+      const { data: newCart, error: cartCreateError } = await supabaseAdmin
+        .from('carts')
+        .insert({ user_id: userId })
+        .select('id')
+        .single();
+      if (cartCreateError || !newCart) {
+        return res.status(500).json({ error: 'Erro ao preparar carrinho', code: 'CART_CREATE_FAILED' });
+      }
+      cartId = newCart.id;
+    }
+    const added = [];
+    const skipped = [];
+    for (const it of items) {
+      const pid = it.product_id;
+      const color = it.color ?? it.selected_color ?? null;
+      const size = it.size ?? it.selected_size ?? null;
+      let variant;
+      if (color || size) {
+        const { data: v } = await supabaseAdmin
+          .from('product_variants')
+          .select('id, price, discounted_price, has_discount, stock')
+          .eq('product_id', pid)
+          .eq('color', color)
+          .eq('size', size)
+          .maybeSingle();
+        variant = v || null;
+      }
+      if (!variant) {
+        const { data: v2 } = await supabaseAdmin
+          .from('product_variants')
+          .select('id, price, discounted_price, has_discount, stock')
+          .eq('product_id', pid)
+          .limit(1)
+          .maybeSingle();
+        variant = v2 || null;
+      }
+      if (!variant) {
+        skipped.push({ product_id: pid });
+        continue;
+      }
+      const priceAtPurchase = variant.has_discount ? (variant.discounted_price ?? variant.price) : variant.price;
+      const { data: existingItem } = await supabaseAdmin
+        .from('cart_items')
+        .select('id, quantity')
+        .eq('cart_id', cartId)
+        .eq('product_variant_id', variant.id)
+        .maybeSingle();
+      if (existingItem) {
+        const newQty = existingItem.quantity + (Number(it.quantity) || 1);
+        if (variant.stock < newQty) {
+          skipped.push({ product_variant_id: variant.id, reason: 'OUT_OF_STOCK' });
+          continue;
+        }
+        const { data: updated } = await supabaseAdmin
+          .from('cart_items')
+          .update({ quantity: newQty })
+          .eq('id', existingItem.id)
+          .select()
+          .single();
+        if (updated) added.push(updated);
+      } else {
+        if (variant.stock < (Number(it.quantity) || 1)) {
+          skipped.push({ product_variant_id: variant.id, reason: 'OUT_OF_STOCK' });
+          continue;
+        }
+        const { data: inserted } = await supabaseAdmin
+          .from('cart_items')
+          .insert({
+            cart_id: cartId,
+            product_variant_id: variant.id,
+            quantity: Number(it.quantity) || 1,
+            price: priceAtPurchase
+          })
+          .select()
+          .single();
+        if (inserted) added.push(inserted);
+      }
+    }
+    return res.status(201).json({ success: true, cart_id: cartId, added_count: added.length, skipped });
   } catch (error) {
     next(error);
   }
