@@ -1,4 +1,5 @@
 const { supabase, supabaseAdmin } = require('../config/supabase')
+const { verifyGoogleToken } = require('../utils/google-auth');
 const jwt = require('jsonwebtoken');
 const { findUserById } = require('../db/user-queries');
 const { checkIfTokenInvalidated } = require('../utils/tokenManager');
@@ -524,12 +525,26 @@ const authenticateSupabaseGoogleUser = async (req, res, next) => {
 
   try {
     const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-    if (error || !user) {
-      return res.status(401).json({ success: false, message: 'Token inválido', code: 'INVALID_TOKEN' });
-    }
+    let email;
+    let googleId;
 
-    const email = user.email;
-    const googleId = user?.user_metadata?.sub || (Array.isArray(user?.identities) ? user.identities[0]?.identity_data?.sub : null);
+    if (!error && user) {
+      email = user.email;
+      googleId = user?.user_metadata?.sub || (Array.isArray(user?.identities) ? user.identities[0]?.identity_data?.sub : null);
+      req.supabaseUser = user;
+      req.supabaseAuthUser = user;
+    } else {
+      let payload;
+      try {
+        payload = await verifyGoogleToken(token);
+      } catch (verifyErr) {
+        return res.status(401).json({ success: false, message: 'Token inválido', code: 'INVALID_TOKEN' });
+      }
+      email = payload?.email;
+      googleId = payload?.sub || null;
+      req.supabaseUser = null;
+      req.supabaseAuthUser = null;
+    }
 
     // Buscar perfil Google por email (fallback para google_id)
     let { data: profile, error: profileError } = await supabaseAdmin
@@ -578,8 +593,6 @@ const authenticateSupabaseGoogleUser = async (req, res, next) => {
 
     req.user = userData;
     req.userId = userData.id;
-    req.supabaseUser = user;
-    req.supabaseAuthUser = user;
 
     next();
   } catch (e) {
