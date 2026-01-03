@@ -9,6 +9,21 @@ const { authenticateSupabaseGoogleUser } = require('../middleware/auth');
 const { MercadoPagoConfig, Payment } = require('mercadopago');
 const { randomUUID } = require('crypto');
 
+function mapStatusDetailMessage(code) {
+  const map = {
+    cc_rejected_bad_filled_card_number: 'Número do cartão inválido',
+    cc_rejected_bad_filled_date: 'Data de validade inválida',
+    cc_rejected_bad_filled_other: 'Dados do cartão inválidos',
+    cc_rejected_other_reason: 'Pagamento rejeitado pelo emissor',
+    cc_rejected_insufficient_amount: 'Saldo insuficiente',
+    cc_rejected_call_for_authorize: 'Transação não autorizada pelo banco',
+    cc_rejected_high_risk: 'Pagamento rejeitado por prevenção de risco',
+    cc_rejected_blacklist: 'Pagamento rejeitado',
+    card_token_expired: 'Token do cartão expirado',
+    bad_request: 'Requisição inválida'
+  };
+  return map[code] || 'Pagamento rejeitado';
+}
 /**
  * POST /mp/credit-card
  * Processa pagamento com cartão de crédito via Mercado Pago
@@ -480,6 +495,7 @@ router.post('/process_payment', async (req, res) => {
         payment_id: mpData?.id ? String(mpData.id) : null,
         payment_status: mpData?.status || 'pending',
         status: mappedStatus,
+        payment_data: mpData || null,
         ...statusTimestamps,
         updated_at: new Date().toISOString()
       })
@@ -541,6 +557,9 @@ router.post('/process_payment', async (req, res) => {
       status_detail: mpData.status_detail,
       id: mpData.id,
       external_reference: externalRef,
+      message: mpData.status === 'approved' ? 'Pagamento aprovado' : (mpData.status === 'rejected' ? 'Pagamento rejeitado' : 'Pagamento pendente'),
+      reason_code: mpData.status_detail,
+      reason_message: mpData.status === 'rejected' ? mapStatusDetailMessage(mpData.status_detail) : undefined,
       order: updatedOrder
     });
   } catch (error) {
@@ -1048,9 +1067,18 @@ router.post('/process-card', async (req, res) => {
     const response = await mp.payment.create({ body });
     const data = response.body || response;
 
+    const mapped = data?.status === 'approved' ? 'pago' : (data?.status === 'rejected' ? 'pagamento_rejeitado' : 'pendente');
+    const ts = data?.status === 'approved' ? { payment_confirmed_at: new Date().toISOString() } : (data?.status === 'rejected' ? { payment_rejected_at: new Date().toISOString() } : {});
     await supabaseAdmin
       .from('orders')
-      .update({ payment_id: data?.id ? String(data.id) : null, payment_status: data?.status || 'pending' })
+      .update({
+        payment_id: data?.id ? String(data.id) : null,
+        payment_status: data?.status || 'pending',
+        status: mapped,
+        payment_data: data || null,
+        ...ts,
+        updated_at: new Date().toISOString()
+      })
       .eq('id', targetOrderId);
 
     if (items.length > 0) {
@@ -1093,7 +1121,13 @@ router.post('/process-card', async (req, res) => {
       if (freshOrder) updatedOrder = freshOrder;
     } catch {}
 
-    return res.json({ ...data, order: updatedOrder });
+    return res.json({
+      ...data,
+      message: data.status === 'approved' ? 'Pagamento aprovado' : (data.status === 'rejected' ? 'Pagamento rejeitado' : 'Pagamento pendente'),
+      reason_code: data.status_detail,
+      reason_message: data.status === 'rejected' ? mapStatusDetailMessage(data.status_detail) : undefined,
+      order: updatedOrder
+    });
   } catch (err) {
     const mpError = err?.cause?.[0] || err?.response?.data;
     console.log(err);
