@@ -2,6 +2,16 @@ const express = require('express');
 const { supabase, supabaseAdmin } = require('../config/supabase');
 const router = express.Router();
 
+function formatShippingAddress(addr) {
+  if (!addr || typeof addr !== 'object') return null;
+  const street = [addr.logradouro, addr.numero].filter(Boolean).join(', ');
+  const district = addr.bairro || null;
+  const cityState = [addr.cidade, addr.estado].filter(Boolean).join(' - ');
+  const cep = addr.cep || null;
+  const complemento = addr.complemento || null;
+  return [street, district, cityState, cep, complemento].filter(Boolean).join(' | ');
+}
+
 /**
  * GET /orders
  * Lista todos os pedidos do usuário autenticado
@@ -135,6 +145,7 @@ router.get('/:id', async (req, res, next) => {
       total: order.total,
       payment_method: order.payment_method,
       shipping_address: order.shipping_address,
+      shipping_address_formatted: formatShippingAddress(order.shipping_address),
       items,
       created_at: order.created_at,
       updated_at: order.updated_at,
@@ -143,6 +154,38 @@ router.get('/:id', async (req, res, next) => {
     };
 
     res.json({ order: orderDetails });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:id/address', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.userId;
+
+    const { data: order, error } = await supabase
+      .from('orders')
+      .select('id, user_id, shipping_address')
+      .eq('user_id', userId)
+      .or(`id.eq.${id},external_reference.eq.${id},payment_id.eq.${id}`)
+      .maybeSingle();
+
+    if (error || !order) {
+      return res.status(404).json({
+        error: 'Pedido não encontrado',
+        code: 'ORDER_NOT_FOUND'
+      });
+    }
+
+    const address = order.shipping_address || null;
+    const formatted = formatShippingAddress(address);
+
+    res.json({
+      address: address,
+      formatted: formatted,
+      order_id: order.id
+    });
   } catch (error) {
     next(error);
   }
