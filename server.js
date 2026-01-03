@@ -244,8 +244,6 @@ app.use('/auth', authRoutes);
 app.use('/products', productRoutes);
 app.use('/shipping', shippingRoutes);
 app.use('/webhook', webhookRoutes);
-app.use('/orders', authenticateToken, orderRoutes);
-app.use('/checkout', authenticateToken, checkoutRoutes);
 app.use('/upload', uploadRoutes);
 app.use('/admin', adminRoutes);
 app.use('/payment', paymentRoutes);
