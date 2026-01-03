@@ -981,6 +981,40 @@ router.post('/process-card', async (req, res) => {
     const items = Array.isArray(rawItems) ? rawItems : [];
     const shippingAddress = req.body?.shipping_address || null;
 
+    const payerInput = req.body?.payer || {};
+    const fullName = payerInput.first_name || payerInput.last_name ? `${payerInput.first_name || ''} ${payerInput.last_name || ''}`.trim() : (payerInput.firstName ? `${payerInput.firstName || ''} ${payerInput.lastName || ''}`.trim() : (payerInput.name || (userInfo?.full_name || '')));
+    const nameParts = typeof fullName === 'string' && fullName.length > 0 ? fullName.split(' ') : [];
+    const normalizedPayer = {
+      email: payerInput.email || userInfo?.email || req.body?.email || null,
+      identification: payerInput.identification ? {
+        type: payerInput.identification.type || 'CPF',
+        number: String(payerInput.identification.number || '').replace(/\D/g, '')
+      } : undefined,
+      first_name: payerInput.first_name || payerInput.firstName || (nameParts[0] || undefined),
+      last_name: payerInput.last_name || payerInput.lastName || (nameParts.slice(1).join(' ') || undefined)
+    };
+
+    const normalizedItems = items.map(it => ({
+      id: String(it.id ?? it.product_id ?? it.productId ?? ''),
+      title: it.title ?? it.product_name ?? it.name ?? null,
+      quantity: Number(it.quantity || 1),
+      unit_price: Number(it.unit_price ?? it.product_price ?? it.price ?? 0)
+    })).filter(it => it.id && it.title);
+
+    const normalizedAdditionalInfo = {};
+    if (normalizedItems.length > 0) normalizedAdditionalInfo.items = normalizedItems;
+    if (shippingAddress) {
+      normalizedAdditionalInfo.shipments = {
+        receiver_address: {
+          zip_code: shippingAddress.zip_code || shippingAddress.cep || null,
+          street_name: shippingAddress.street_name || shippingAddress.logradouro || null,
+          street_number: shippingAddress.street_number || shippingAddress.numero || null,
+          city_name: shippingAddress.city_name || shippingAddress.cidade || null,
+          state_name: shippingAddress.state_name || shippingAddress.estado || null
+        }
+      };
+    }
+
     let userInfo = null;
     try {
       const { data: profile } = await supabaseAdmin
@@ -1062,6 +1096,22 @@ router.post('/process-card', async (req, res) => {
     };
     if (body?.transaction_amount != null && !isNaN(Number(body.transaction_amount))) {
       body.transaction_amount = Number(Number(body.transaction_amount).toFixed(2));
+    }
+
+    if (normalizedPayer.email) {
+      body.payer = {
+        ...(body.payer || {}),
+        ...normalizedPayer
+      };
+    }
+    if (Object.keys(normalizedAdditionalInfo).length > 0) {
+      body.additional_info = {
+        ...(body.additional_info || {}),
+        ...normalizedAdditionalInfo
+      };
+    }
+    if (body.items) {
+      delete body.items;
     }
 
     const response = await mp.payment.create({ body });
