@@ -980,6 +980,7 @@ router.post('/process-card', async (req, res) => {
       : (Array.isArray(req.body?.additional_info?.items) ? req.body.additional_info.items : []);
     const items = Array.isArray(rawItems) ? rawItems : [];
     const shippingAddress = req.body?.shipping_address || null;
+    let userInfo = null;
 
     const payerInput = req.body?.payer || {};
     const fullName = payerInput.first_name || payerInput.last_name ? `${payerInput.first_name || ''} ${payerInput.last_name || ''}`.trim() : (payerInput.firstName ? `${payerInput.firstName || ''} ${payerInput.lastName || ''}`.trim() : (payerInput.name || (userInfo?.full_name || '')));
@@ -1015,7 +1016,6 @@ router.post('/process-card', async (req, res) => {
       };
     }
 
-    let userInfo = null;
     try {
       const { data: profile } = await supabaseAdmin
         .from('user_profiles')
