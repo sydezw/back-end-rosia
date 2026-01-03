@@ -136,6 +136,46 @@ router.get('/:id', async (req, res, next) => {
       }));
     }
 
+    let customer = { name: null, cpf: null, birth_date: null };
+    try {
+      if (order.google_user_profile_id) {
+        const { data: g } = await supabase
+          .from('google_user_profiles')
+          .select('nome, cpf, data_nascimento')
+          .eq('id', order.google_user_profile_id)
+          .maybeSingle();
+        if (g) {
+          customer = {
+            name: g.nome || null,
+            cpf: g.cpf || null,
+            birth_date: g.data_nascimento || null
+          };
+        }
+      }
+      if (!customer.name || !customer.cpf || !customer.birth_date) {
+        const ui = order.user_info || {};
+        customer = {
+          name: ui.nome || ui.full_name || customer.name,
+          cpf: ui.cpf || customer.cpf,
+          birth_date: ui.data_nascimento || ui.birth_date || customer.birth_date
+        };
+      }
+      if ((!customer.name || !customer.cpf || !customer.birth_date) && order.user_id) {
+        const { data: up } = await supabase
+          .from('user_profiles')
+          .select('full_name, cpf, birth_date')
+          .eq('id', order.user_id)
+          .maybeSingle();
+        if (up) {
+          customer = {
+            name: customer.name || up.full_name || null,
+            cpf: customer.cpf || up.cpf || null,
+            birth_date: customer.birth_date || up.birth_date || null
+          };
+        }
+      }
+    } catch {}
+
     const orderDetails = {
       id: order.id,
       external_reference: order.external_reference || order.payment_id || order.id,
@@ -146,6 +186,7 @@ router.get('/:id', async (req, res, next) => {
       payment_method: order.payment_method,
       shipping_address: order.shipping_address,
       shipping_address_formatted: formatShippingAddress(order.shipping_address),
+      customer,
       items,
       created_at: order.created_at,
       updated_at: order.updated_at,
