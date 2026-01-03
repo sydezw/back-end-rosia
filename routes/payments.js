@@ -327,6 +327,52 @@ router.post('/process_payment', async (req, res) => {
     try {
       const response = await mp.payment.create({ body }, { idempotencyKey });
       const data = response.body || response;
+
+      const externalRef = req.body?.external_reference || null;
+      const bodyOrderId = req.body?.order_id || req.body?.orderId || null;
+      const supabaseUserId = req.body?.supabase_user_id || req.body?.user_id || null;
+      let targetOrderId = bodyOrderId || null;
+      try {
+        if (!targetOrderId && externalRef) {
+          const { data: byRef } = await supabaseAdmin
+            .from('orders')
+            .select('id')
+            .eq('external_reference', externalRef)
+            .maybeSingle();
+          if (byRef?.id) targetOrderId = byRef.id;
+        }
+      } catch {}
+      if (!targetOrderId) targetOrderId = bodyOrderId || uuidv4();
+
+      const rawItems = Array.isArray(req.body?.items)
+        ? req.body.items
+        : (Array.isArray(req.body?.additional_info?.items) ? req.body.additional_info.items : []);
+      const items = Array.isArray(rawItems) ? rawItems : [];
+      const shippingAddress = req.body?.shipping_address ?? {};
+      const subtotal = req.body?.subtotal != null ? Number(req.body.subtotal) : items.reduce((sum, it) => sum + Number(it.unit_price ?? it.product_price ?? it.price ?? 0) * Number(it.quantity ?? 1), 0);
+      const shipping_cost = req.body?.shipping_cost != null ? Number(req.body.shipping_cost) : 0;
+      const total = Number(Number((subtotal + shipping_cost)).toFixed(2));
+
+      try {
+        const payload = {
+          id: targetOrderId,
+          user_id: supabaseUserId,
+          external_reference: externalRef || targetOrderId,
+          items,
+          subtotal,
+          shipping_cost,
+          total,
+          status: data.status === 'approved' ? 'pago' : 'pendente',
+          payment_method: 'credit_card',
+          payment_status: data.status,
+          payment_id: data?.id ? String(data.id) : null,
+          shipping_address: shippingAddress,
+          updated_at: new Date().toISOString(),
+          payment_confirmed_at: data.status === 'approved' ? new Date().toISOString() : null
+        };
+        await supabaseAdmin.from('orders').upsert([payload], { onConflict: 'id' });
+      } catch {}
+
       return res.status(200).json(data);
     } catch (e1) {
       // Retry sem issuer_id quando presente
@@ -336,6 +382,37 @@ router.post('/process_payment', async (req, res) => {
         try {
           const retryResp = await mp.payment.create({ body: retryBody }, { idempotencyKey });
           const retryData = retryResp.body || retryResp;
+          try {
+            const externalRef = req.body?.external_reference || null;
+            const bodyOrderId = req.body?.order_id || req.body?.orderId || null;
+            const supabaseUserId = req.body?.supabase_user_id || req.body?.user_id || null;
+            const targetOrderId = bodyOrderId || uuidv4();
+            const rawItems = Array.isArray(req.body?.items)
+              ? req.body.items
+              : (Array.isArray(req.body?.additional_info?.items) ? req.body.additional_info.items : []);
+            const items = Array.isArray(rawItems) ? rawItems : [];
+            const shippingAddress = req.body?.shipping_address ?? {};
+            const subtotal = req.body?.subtotal != null ? Number(req.body.subtotal) : items.reduce((sum, it) => sum + Number(it.unit_price ?? it.product_price ?? it.price ?? 0) * Number(it.quantity ?? 1), 0);
+            const shipping_cost = req.body?.shipping_cost != null ? Number(req.body.shipping_cost) : 0;
+            const total = Number(Number((subtotal + shipping_cost)).toFixed(2));
+            const payload = {
+              id: targetOrderId,
+              user_id: supabaseUserId,
+              external_reference: externalRef || targetOrderId,
+              items,
+              subtotal,
+              shipping_cost,
+              total,
+              status: retryData.status === 'approved' ? 'pago' : 'pendente',
+              payment_method: 'credit_card',
+              payment_status: retryData.status,
+              payment_id: retryData?.id ? String(retryData.id) : null,
+              shipping_address: shippingAddress,
+              updated_at: new Date().toISOString(),
+              payment_confirmed_at: retryData.status === 'approved' ? new Date().toISOString() : null
+            };
+            await supabaseAdmin.from('orders').upsert([payload], { onConflict: 'id' });
+          } catch {}
           return res.status(200).json(retryData);
         } catch (e2) {
           const mpError2 = e2?.cause?.[0] || e2?.response?.data;
