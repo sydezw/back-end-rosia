@@ -962,6 +962,30 @@ router.post('/process-card', async (req, res) => {
     const items = Array.isArray(rawItems) ? rawItems : [];
     const shippingAddress = req.body?.shipping_address || null;
 
+    let userInfo = null;
+    try {
+      const { data: profile } = await supabaseAdmin
+        .from('user_profiles')
+        .select('full_name, cpf, phone, birth_date')
+        .eq('id', supabaseUserId)
+        .maybeSingle();
+      let email = null;
+      try {
+        const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(supabaseUserId);
+        email = authUser?.user?.email || null;
+      } catch {}
+      if (profile || email) {
+        userInfo = {
+          source: 'user_profiles',
+          id: supabaseUserId,
+          email,
+          full_name: profile?.full_name || null,
+          cpf: profile?.cpf || null,
+          phone: profile?.phone || null,
+          birth_date: profile?.birth_date || null
+        };
+      }
+    } catch {}
     if (!targetOrderId) {
       targetOrderId = uuidv4();
       const orderPayload = {
@@ -977,6 +1001,7 @@ router.post('/process-card', async (req, res) => {
         shipping_address: shippingAddress,
         google_user_profile_id: req.body?.google_user_profile_id || null,
         google_user_admin_id: req.body?.google_user_admin_id || null,
+        user_info: userInfo,
         updated_at: new Date().toISOString(),
         created_at: new Date().toISOString()
       };
@@ -1003,6 +1028,7 @@ router.post('/process-card', async (req, res) => {
             shipping_address: shippingAddress,
             google_user_profile_id: req.body?.google_user_profile_id || null,
             google_user_admin_id: req.body?.google_user_admin_id || null,
+            user_info: userInfo,
             updated_at: new Date().toISOString()
           })
           .eq('id', targetOrderId);

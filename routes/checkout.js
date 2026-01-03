@@ -1,5 +1,5 @@
 const express = require('express');
-const { supabase } = require('../config/supabase');
+const { supabase, supabaseAdmin } = require('../config/supabase');
 const { v4: uuidv4 } = require('uuid');
 const router = express.Router();
 
@@ -93,6 +93,30 @@ router.post('/create', async (req, res, next) => {
     // Criar pedido
     const orderId = uuidv4();
     const externalRef = `ORDER-${Date.now()}`;
+    let userInfo = null;
+    try {
+      const { data: profile } = await supabaseAdmin
+        .from('user_profiles')
+        .select('full_name, cpf, phone, birth_date')
+        .eq('id', userId)
+        .maybeSingle();
+      let email = null;
+      try {
+        const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+        email = authUser?.user?.email || null;
+      } catch {}
+      if (profile || email) {
+        userInfo = {
+          source: 'user_profiles',
+          id: userId,
+          email,
+          full_name: profile?.full_name || null,
+          cpf: profile?.cpf || null,
+          phone: profile?.phone || null,
+          birth_date: profile?.birth_date || null
+        };
+      }
+    } catch {}
     const orderData = {
       id: orderId,
       user_id: userId,
@@ -104,6 +128,7 @@ router.post('/create', async (req, res, next) => {
       status: 'pendente',
       payment_method: payment_method || 'pix',
       shipping_address: shipping_address,
+      user_info: userInfo,
       created_at: new Date().toISOString()
     };
 

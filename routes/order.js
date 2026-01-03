@@ -115,6 +115,25 @@ router.post('/checkout', authenticateSupabaseGoogleUser, async (req, res, next) 
 
     // Criar pedido na tabela orders (sem os itens)
     const orderId = uuidv4();
+    let userInfo = null;
+    try {
+      const { data: profile } = await supabaseAdmin
+        .from('google_user_profiles')
+        .select('id, email, nome, telefone, cpf, data_nascimento')
+        .eq('id', googleUserId)
+        .maybeSingle();
+      if (profile) {
+        userInfo = {
+          source: 'google_user_profiles',
+          id: profile.id,
+          email: profile.email || googleEmail || null,
+          nome: profile.nome || null,
+          telefone: profile.telefone || null,
+          cpf: profile.cpf || null,
+          data_nascimento: profile.data_nascimento || null
+        };
+      }
+    } catch {}
     const orderPayload = {
       id: orderId,
       user_id: supabaseAuthUserId,
@@ -125,6 +144,8 @@ router.post('/checkout', authenticateSupabaseGoogleUser, async (req, res, next) 
       status: 'pendente',
       payment_method: payment_method === 'credit_card' ? 'cartao_credito' : payment_method,
       shipping_address: shipping_address || {},
+      google_user_profile_id: googleUserId || null,
+      user_info: userInfo,
       external_reference: orderId,
       created_at: new Date().toISOString()
     };
