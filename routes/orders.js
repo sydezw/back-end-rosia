@@ -1,5 +1,6 @@
 const express = require('express');
 const { supabase, supabaseAdmin } = require('../config/supabase');
+const { getMercadoPago } = require('../config/mercadopago');
 const router = express.Router();
 
 function formatShippingAddress(addr) {
@@ -503,6 +504,144 @@ router.post('/:id/reorder', async (req, res, next) => {
     }
     return res.status(201).json({ success: true, cart_id: cartId, added_count: added.length, skipped });
   } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/:id/payment', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.userId;
+
+    const { data: order, error: orderError } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
+
+    if (orderError || !order) {
+      return res.status(404).json({ error: 'Pedido não encontrado', code: 'ORDER_NOT_FOUND' });
+    }
+
+    if (order.status !== 'pendente') {
+      return res.status(400).json({ error: 'Pedido não pode ser pago', code: 'ORDER_NOT_PAYABLE', current_status: order.status });
+    }
+
+    const token = req.body?.token;
+    const transaction_amount = Number(req.body?.transaction_amount ?? req.body?.amount);
+    const payment_method_id = req.body?.payment_method_id ?? req.body?.brand;
+    const installments = typeof req.body?.installments === 'number' ? req.body.installments : Number(req.body?.installments) || 1;
+    const issuer_id = req.body?.issuer_id ?? req.body?.issuerId ?? null;
+    const email = req.body?.email ?? req.body?.payer?.email ?? req.user?.email ?? null;
+    const cpfNum = req.body?.cpf ?? req.body?.payer?.identification?.number ?? null;
+
+    if (!token || !transaction_amount || !payment_method_id || !email) {
+      return res.status(400).json({
+        error: 'Dados de pagamento incompletos',
+        code: 'INCOMPLETE_PAYMENT_DATA',
+        required_fields: ['token', 'transaction_amount', 'payment_method_id', 'email']
+      });
+    }
+
+    if (Math.abs(transaction_amount - Number(order.total)) > 0.01) {
+      return res.status(400).json({
+        error: 'Valor do pagamento não confere com o pedido',
+        code: 'AMOUNT_MISMATCH',
+        order_total: order.total,
+        payment_amount: transaction_amount
+      });
+    }
+
+    const mp = getMercadoPago();
+
+    const paymentData = {
+      token,
+      transaction_amount,
+      description: `Pedido #${order.external_reference || id} - Rosita Floral Elegance`,
+      installments,
+      payment_method_id,
+      issuer_id,
+      external_reference: order.external_reference || id,
+      order_id: id,
+      payer: {
+        email,
+        identification: { type: 'CPF', number: cpfNum },
+        first_name: req.body?.payer?.first_name || '',
+        last_name: req.body?.payer?.last_name || ''
+      },
+      billing_address: req.body?.billing_address
+    };
+
+    const paymentResponse = await mp.createPayment(paymentData);
+
+    await supabase
+      .from('orders')
+      .update({
+        payment_id: paymentResponse.id,
+        payment_method: 'credit_card',
+        payment_status: paymentResponse.status,
+        payment_data: {
+          mp_payment_id: paymentResponse.id,
+          status: paymentResponse.status,
+          status_detail: paymentResponse.status_detail,
+          payment_method_id: paymentResponse.payment_method_id,
+          installments: paymentResponse.installments
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id);
+
+    const responseData = {
+      payment_id: paymentResponse.id,
+      status: paymentResponse.status,
+      status_detail: paymentResponse.status_detail,
+      order_id: id,
+      transaction_amount: paymentResponse.transaction_amount,
+      installments: paymentResponse.installments
+    };
+
+    if (paymentResponse.status === 'approved') {
+      await supabase
+        .from('orders')
+        .update({ status: 'pago', payment_confirmed_at: new Date().toISOString() })
+        .eq('id', id);
+      responseData.message = 'Pagamento aprovado com sucesso!';
+    } else if (paymentResponse.status === 'pending') {
+      responseData.message = 'Pagamento pendente de aprovação.';
+      responseData.pending_reason = paymentResponse.status_detail;
+    } else if (paymentResponse.status === 'rejected') {
+      responseData.message = 'Pagamento rejeitado.';
+      responseData.rejection_reason = paymentResponse.status_detail;
+      if (order.items && Array.isArray(order.items)) {
+        for (const item of order.items) {
+          if (item.product_id && item.quantity) {
+            const { data: product } = await supabase
+              .from('products')
+              .select('stock')
+              .eq('id', item.product_id)
+              .single();
+            if (product) {
+              await supabase
+                .from('products')
+                .update({ stock: product.stock + item.quantity })
+                .eq('id', item.product_id);
+            }
+          }
+        }
+      }
+    }
+
+    res.json(responseData);
+  } catch (error) {
+    if (error.cause && error.cause.length > 0) {
+      const mpError = error.cause[0];
+      return res.status(400).json({
+        error: 'Erro no processamento do pagamento',
+        code: mpError.code,
+        description: mpError.description
+      });
+    }
     next(error);
   }
 });
