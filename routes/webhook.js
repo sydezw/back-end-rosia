@@ -1,5 +1,5 @@
 const express = require('express');
-const { supabase } = require('../config/supabase');
+const { supabaseAdmin } = require('../config/supabase');
 const crypto = require('crypto');
 const { MercadoPagoConfig, Payment } = require('mercadopago');
 const router = express.Router();
@@ -471,6 +471,7 @@ async function handleMercadoPagoWebhook(webhookData, res) {
         payment_id: String(paymentId),
         payment_status: paymentData.status,
         payment_data: paymentData,
+        payment_confirmed_at: paymentData.status === 'approved' ? new Date().toISOString() : null,
         updated_at: new Date().toISOString()
       })
       .eq('id', order.id);

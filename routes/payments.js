@@ -450,7 +450,8 @@ router.post('/mp/process', async (req, res) => {
         description: req.body?.description || 'Pagamento via Pix',
         payment_method_id: 'pix',
         payer: { email },
-        external_reference: req.body?.external_reference || null
+        external_reference: req.body?.external_reference || null,
+        notification_url: `${process.env.BACKEND_URL || 'https://back-end-rosia02.vercel.app'}/webhook/payment`
       };
 
       const response = await mp.payment.create({ body }, { idempotencyKey });
@@ -894,6 +895,8 @@ router.post('/pix/create', async (req, res) => {
         payer: {
           email,
         },
+        external_reference: req.body?.external_reference || null,
+        notification_url: `${process.env.BACKEND_URL || 'https://back-end-rosia02.vercel.app'}/webhook/payment`
       },
       requestOptions: {
         idempotencyKey: randomUUID(), // 🔑 OBRIGATÓRIO

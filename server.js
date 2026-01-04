@@ -181,7 +181,7 @@ app.post('/api/payments,', (req, res) => {
 
 // 🔓 Endpoint público para criar pagamento Pix (sem autenticação)
 app.post('/api/pix/create', (req, res) => {
-  req.url = '/mp/orders/pix';
+  req.url = '/pix/create';
   paymentsRoutes.handle(req, res, () => {});
 });
 
