@@ -537,13 +537,22 @@ const authenticateSupabaseGoogleUser = async (req, res, next) => {
       let payload;
       try {
         payload = await verifyGoogleToken(token);
+        email = payload?.email;
+        googleId = payload?.sub || null;
+        req.supabaseUser = null;
+        req.supabaseAuthUser = null;
       } catch (verifyErr) {
-        return res.status(401).json({ success: false, message: 'Token inválido', code: 'INVALID_TOKEN' });
+        // Fallback: tentar validar JWT local gerado pelo backend
+        try {
+          const decoded = jwt.verify(token, process.env.JWT_SECRET);
+          email = decoded?.email;
+          googleId = decoded?.googleId || decoded?.sub || null;
+          req.supabaseUser = null;
+          req.supabaseAuthUser = null;
+        } catch (jwtErr) {
+          return res.status(401).json({ success: false, message: 'Token inválido', code: 'INVALID_TOKEN' });
+        }
       }
-      email = payload?.email;
-      googleId = payload?.sub || null;
-      req.supabaseUser = null;
-      req.supabaseAuthUser = null;
     }
 
     // Buscar perfil Google por email (fallback para google_id)

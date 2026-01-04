@@ -56,6 +56,9 @@ router.post('/login', async (req, res, next) => {
         name: data.user.user_metadata?.name || data.user.user_metadata?.full_name,
         avatar: data.user.user_metadata?.avatar_url
       },
+      access_token: data.session ? data.session.access_token : null,
+      refresh_token: data.session ? data.session.refresh_token : null,
+      expires_at: data.session ? data.session.expires_at : null,
       session: {
         access_token: data.session.access_token,
         refresh_token: data.session.refresh_token,
@@ -150,6 +153,9 @@ router.post('/register', async (req, res, next) => {
         email: data.user?.email,
         name: nome
       },
+      access_token: data.session ? data.session.access_token : null,
+      refresh_token: data.session ? data.session.refresh_token : null,
+      expires_at: data.session ? data.session.expires_at : null,
       session: data.session ? {
         access_token: data.session.access_token,
         refresh_token: data.session.refresh_token,
@@ -344,6 +350,23 @@ router.post('/login/google', async (req, res, next) => {
       });
     }
 
+    // Tentar criar sessão Supabase com o id_token
+    let supabaseSession = null;
+    try {
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithIdToken({
+        provider: 'google',
+        token: token.trim()
+      });
+      if (!signInError && signInData?.session) {
+        supabaseSession = signInData.session;
+        console.log('✅ Sessão Supabase criada com id_token (Google)');
+      } else if (signInError) {
+        console.warn('⚠️ Falha ao criar sessão Supabase com id_token:', signInError.message);
+      }
+    } catch (exSession) {
+      console.warn('⚠️ Exceção ao criar sessão Supabase:', exSession.message);
+    }
+
     // Validar JWT_SECRET
     if (!process.env.JWT_SECRET) {
       console.error('❌ JWT_SECRET não configurado');
@@ -406,8 +429,10 @@ router.post('/login/google', async (req, res, next) => {
         hasProfile: true,
         emailVerified: emailVerified
       },
-      token: jwtToken,
-      access_token: jwtToken,  // Compatibilidade com frontend que espera access_token
+      token: supabaseSession ? supabaseSession.access_token : jwtToken,
+      access_token: supabaseSession ? supabaseSession.access_token : jwtToken,
+      refresh_token: supabaseSession ? supabaseSession.refresh_token : null,
+      expires_at: supabaseSession ? supabaseSession.expires_at : null,
       // Instruções para o frontend evitar salvar "undefined"
       frontend_instructions: {
         validation: {
@@ -632,6 +657,9 @@ router.post('/refresh', async (req, res, next) => {
 
     res.json({
       success: true,
+      access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
+      expires_at: data.session.expires_at,
       session: {
         access_token: data.session.access_token,
         refresh_token: data.session.refresh_token,
@@ -1914,7 +1942,7 @@ router.post('/login/google-separated', async (req, res) => {
   console.log('🔍 POST /api/auth/login/google-separated - Dados recebidos:', req.body);
   
   try {
-    const { email, name, picture, email_verified, sub } = req.body;
+    const { email, name, picture, email_verified, sub, id_token } = req.body;
     const GOOGLE_SEPARATED_CONTRACT_VERSION = '1.0.0';
 
     // Blindagem: garantir presença de segredo e validar tipos antes de qualquer operação
@@ -2043,6 +2071,25 @@ router.post('/login/google-separated', async (req, res) => {
       }
     }
     
+    // Opcional: tentar criar sessão Supabase se id_token foi fornecido
+    let supabaseSession = null;
+    if (typeof id_token === 'string' && id_token.trim().length > 0) {
+      try {
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithIdToken({
+          provider: 'google',
+          token: id_token.trim()
+        });
+        if (!signInError && signInData?.session) {
+          supabaseSession = signInData.session;
+          console.log('✅ Sessão Supabase criada em google-separated');
+        } else if (signInError) {
+          console.warn('⚠️ Falha ao criar sessão Supabase em google-separated:', signInError.message);
+        }
+      } catch (errSign) {
+        console.warn('⚠️ Exceção signInWithIdToken em google-separated:', errSign.message);
+      }
+    }
+
     // Gerar JWT token específico para usuários Google
     const jwtPayload = {
       googleUserId: user.id,
@@ -2067,8 +2114,10 @@ router.post('/login/google-separated', async (req, res) => {
         provider: 'google-separated',
         emailVerified: true
       },
-      token: token,
-      access_token: token,
+      token: supabaseSession ? supabaseSession.access_token : token,
+      access_token: supabaseSession ? supabaseSession.access_token : token,
+      refresh_token: supabaseSession ? supabaseSession.refresh_token : null,
+      expires_at: supabaseSession ? supabaseSession.expires_at : null,
       message: 'Login Google realizado com sucesso',
       meta: { contractVersion: GOOGLE_SEPARATED_CONTRACT_VERSION }
     });

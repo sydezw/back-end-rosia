@@ -1,5 +1,5 @@
 const express = require('express');
-const { supabase, supabaseAdmin } = require('../config/supabase');
+const { supabaseAdmin } = require('../config/supabase');
 const { getMercadoPago } = require('../config/mercadopago');
 const router = express.Router();
 
@@ -19,14 +19,18 @@ function formatShippingAddress(addr) {
  */
 router.get('/', async (req, res, next) => {
   try {
-    const userId = req.userId;
+    const supabaseUserId = req.supabaseUser?.id || null;
+    const googleProfileId = req.user?.id || req.userId || null;
     const { page = 1, limit = 10, status } = req.query;
     const offset = (page - 1) * limit;
 
-    let query = supabase
+    let query = supabaseAdmin
       .from('orders')
       .select('*')
-      .eq('user_id', userId)
+      .or([
+        supabaseUserId ? `user_id.eq.${supabaseUserId}` : null,
+        googleProfileId ? `google_user_profile_id.eq.${googleProfileId}` : null
+      ].filter(Boolean).join(','))
       .order('created_at', { ascending: false });
 
     // Filtro por status
@@ -44,10 +48,13 @@ router.get('/', async (req, res, next) => {
     }
 
     // Buscar total de pedidos para paginação
-    let countQuery = supabase
+    let countQuery = supabaseAdmin
       .from('orders')
       .select('*', { count: 'exact', head: true })
-      .eq('user_id', userId);
+      .or([
+        supabaseUserId ? `user_id.eq.${supabaseUserId}` : null,
+        googleProfileId ? `google_user_profile_id.eq.${googleProfileId}` : null
+      ].filter(Boolean).join(','));
 
     if (status) {
       countQuery = countQuery.eq('status', status);
@@ -93,14 +100,16 @@ router.get('/:id', async (req, res, next) => {
     const { id } = req.params;
     const userId = req.userId;
 
-    const { data: order, error } = await supabase
+    const { data: order, error } = await supabaseAdmin
       .from('orders')
       .select('*')
-      .eq('user_id', userId)
       .or(`id.eq.${id},external_reference.eq.${id},payment_id.eq.${id}`)
       .maybeSingle();
 
-    if (error || !order) {
+    if (error || !order || !(
+      (supabaseUserId && order.user_id === supabaseUserId) ||
+      (googleProfileId && order.google_user_profile_id === googleProfileId)
+    )) {
       return res.status(404).json({
         error: 'Pedido não encontrado',
         code: 'ORDER_NOT_FOUND'
@@ -110,10 +119,10 @@ router.get('/:id', async (req, res, next) => {
     let items = Array.isArray(order.items) ? order.items : [];
 
     if (!items || items.length === 0) {
-      const { data: orderItems } = await supabase
-        .from('order_items')
-        .select('*')
-        .eq('order_id', order.id);
+        const { data: orderItems } = await supabaseAdmin
+          .from('order_items')
+          .select('*')
+          .eq('order_id', order.id);
       if (Array.isArray(orderItems)) {
         items = orderItems.map(it => ({
           product_id: it.product_id,
@@ -162,7 +171,7 @@ router.get('/:id', async (req, res, next) => {
         };
       }
       if ((!customer.name || !customer.cpf || !customer.birth_date) && order.user_id) {
-        const { data: up } = await supabase
+        const { data: up } = await supabaseAdmin
           .from('user_profiles')
           .select('full_name, cpf, birth_date')
           .eq('id', order.user_id)

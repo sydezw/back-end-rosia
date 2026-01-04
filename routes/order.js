@@ -32,9 +32,6 @@ router.post('/checkout', authenticateSupabaseGoogleUser, async (req, res, next) 
     if (!googleUserId) {
       return res.status(401).json({ success: false, error: 'Usuário não autenticado' });
     }
-    if (!supabaseAuthUserId) {
-      return res.status(401).json({ success: false, error: 'Token inválido' });
-    }
 
     console.log('[order/checkout] userId:', googleUserId);
 
@@ -136,7 +133,7 @@ router.post('/checkout', authenticateSupabaseGoogleUser, async (req, res, next) 
     } catch {}
     const orderPayload = {
       id: orderId,
-      user_id: supabaseAuthUserId,
+      user_id: supabaseAuthUserId || null,
       items: orderItems,
       subtotal,
       shipping_cost: shippingCost,

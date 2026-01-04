@@ -28,7 +28,7 @@ const singleOrderRoutes = require('./routes/order');
 
 // Importar middlewares
 const errorHandler = require('./middleware/errorHandler');
-const { authenticateToken, authenticateUser } = require('./middleware/auth');
+const { authenticateToken, authenticateUser, authenticateSupabaseGoogleUser } = require('./middleware/auth');
 const { requestLogger, errorLogger, logger } = require('./middleware/logger');
 
 // Importar configuração do storage
@@ -135,10 +135,10 @@ app.use('/api/debug', debugRoutes);
 app.use('/api', installmentsRoutes);
 
 // Rotas protegidas
-app.use('/api/orders', authenticateUser, orderRoutes);
+app.use('/api/orders', authenticateSupabaseGoogleUser, orderRoutes);
 app.use('/api/checkout', authenticateUser, checkoutRoutes);
 // Mapear rotas sem prefixo /api para compatibilidade com frontend
-app.use('/orders', authenticateUser, orderRoutes);
+app.use('/orders', authenticateSupabaseGoogleUser, orderRoutes);
 app.use('/checkout', authenticateUser, checkoutRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/admin', adminRoutes);
