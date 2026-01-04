@@ -6,6 +6,35 @@ const router = express.Router();
 
 const mpClient = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN || process.env.VITE_MP_ACCESS_TOKEN });
 const mpPayment = new Payment(mpClient);
+const orderEventListeners = new Map();
+
+router.get('/events/:id', (req, res) => {
+  const id = req.params.id;
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders && res.flushHeaders();
+  if (!orderEventListeners.has(id)) orderEventListeners.set(id, new Set());
+  orderEventListeners.get(id).add(res);
+  res.write(`data: ${JSON.stringify({ ready: true, order_id: id })}\n\n`);
+  req.on('close', () => {
+    const set = orderEventListeners.get(id);
+    if (set) {
+      set.delete(res);
+      if (set.size === 0) orderEventListeners.delete(id);
+    }
+    res.end();
+  });
+});
+
+function broadcastOrderEvent(orderId, payload) {
+  const set = orderEventListeners.get(String(orderId));
+  if (!set) return;
+  const msg = `data: ${JSON.stringify(payload)}\n\n`;
+  for (const res of set) {
+    try { res.write(msg); } catch {}
+  }
+}
 
 /**
  * POST /webhook/payment
@@ -479,6 +508,18 @@ async function handleMercadoPagoWebhook(webhookData, res) {
     if (updateError) throw updateError;
 
     console.log(`✅ Pedido ${orderId} atualizado com sucesso via Webhook.`);
+    broadcastOrderEvent(orderId, {
+      success: true,
+      status: paymentData.status,
+      status_detail: paymentData.status_detail,
+      payment_id: String(paymentId),
+      order: {
+        id: order.id,
+        status: paymentData.status === 'approved' ? 'confirmed' : (paymentData.status === 'rejected' ? 'rejected' : 'pending'),
+        payment_method: 'pix',
+        total: paymentData.transaction_amount
+      }
+    });
     return res.status(200).json({ success: true });
   } catch (error) {
     console.error('❌ Erro no webhook:', error.message);
