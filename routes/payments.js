@@ -480,7 +480,7 @@ router.post('/mp/process', async (req, res) => {
       const shippingAddress = req.body?.shipping_address ?? {};
       const subtotal = req.body?.subtotal != null ? Number(req.body.subtotal) : items.reduce((sum, it) => sum + Number(it.unit_price ?? it.product_price ?? it.price ?? 0) * Number(it.quantity ?? 1), 0);
       const shipping_cost = req.body?.shipping_cost != null ? Number(req.body.shipping_cost) : 0;
-      const total = Number(Number((subtotal + shipping_cost)).toFixed(2));
+      const payment_total = Number(Number(amount).toFixed(2));
 
       try {
         const { data: existing } = await supabaseAdmin
