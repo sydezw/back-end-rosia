@@ -522,16 +522,19 @@ router.post('/:id/reorder', async (req, res, next) => {
 router.post('/:id/payment', async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.userId;
+    const supabaseUserId = req.supabaseUser?.id || null;
+    const googleProfileId = req.user?.id || req.userId || null;
 
-    const { data: order, error: orderError } = await supabase
+    const { data: order, error: orderError } = await supabaseAdmin
       .from('orders')
       .select('*')
-      .eq('id', id)
-      .eq('user_id', userId)
-      .single();
+      .or(`id.eq.${id},external_reference.eq.${id},payment_id.eq.${id}`)
+      .maybeSingle();
 
-    if (orderError || !order) {
+    if (orderError || !order || !(
+      (supabaseUserId && order.user_id === supabaseUserId) ||
+      (googleProfileId && order.google_user_profile_id === googleProfileId)
+    )) {
       return res.status(404).json({ error: 'Pedido não encontrado', code: 'ORDER_NOT_FOUND' });
     }
 
@@ -586,7 +589,7 @@ router.post('/:id/payment', async (req, res, next) => {
 
     const paymentResponse = await mp.createPayment(paymentData);
 
-    await supabase
+    await supabaseAdmin
       .from('orders')
       .update({
         payment_id: paymentResponse.id,
@@ -601,7 +604,7 @@ router.post('/:id/payment', async (req, res, next) => {
         },
         updated_at: new Date().toISOString()
       })
-      .eq('id', id);
+      .eq('id', order.id);
 
     const responseData = {
       payment_id: paymentResponse.id,
@@ -613,10 +616,10 @@ router.post('/:id/payment', async (req, res, next) => {
     };
 
     if (paymentResponse.status === 'approved') {
-      await supabase
+      await supabaseAdmin
         .from('orders')
         .update({ status: 'pago', payment_confirmed_at: new Date().toISOString() })
-        .eq('id', id);
+        .eq('id', order.id);
       responseData.message = 'Pagamento aprovado com sucesso!';
     } else if (paymentResponse.status === 'pending') {
       responseData.message = 'Pagamento pendente de aprovação.';
@@ -627,13 +630,13 @@ router.post('/:id/payment', async (req, res, next) => {
       if (order.items && Array.isArray(order.items)) {
         for (const item of order.items) {
           if (item.product_id && item.quantity) {
-            const { data: product } = await supabase
+            const { data: product } = await supabaseAdmin
               .from('products')
               .select('stock')
               .eq('id', item.product_id)
               .single();
             if (product) {
-              await supabase
+              await supabaseAdmin
                 .from('products')
                 .update({ stock: product.stock + item.quantity })
                 .eq('id', item.product_id);
