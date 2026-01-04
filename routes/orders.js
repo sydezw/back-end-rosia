@@ -1,5 +1,5 @@
 const express = require('express');
-const { supabaseAdmin } = require('../config/supabase');
+const { supabase, supabaseAdmin } = require('../config/supabase');
 const { getMercadoPago } = require('../config/mercadopago');
 const router = express.Router();
 
@@ -99,6 +99,8 @@ router.get('/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.userId;
+    const supabaseUserId = req.supabaseUser?.id || null;
+    const googleProfileId = req.user?.id || req.userId || null;
 
     const { data: order, error } = await supabaseAdmin
       .from('orders')
