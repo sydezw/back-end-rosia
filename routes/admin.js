@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const axios = require('axios');
 const { authenticateUser, authenticateAdmin } = require('../middleware/auth');
 const {
   uploadMultiple,
@@ -776,6 +777,384 @@ router.get('/dashboard/sales', async (req, res) => {
     res.status(500).json({
       error: 'Erro interno do servidor ao buscar vendas'
     });
+  }
+});
+
+function buildSender() {
+  return {
+    name: process.env.SENDER_NAME || null,
+    document: process.env.SENDER_DOCUMENT || null,
+    email: process.env.SENDER_EMAIL || null,
+    phone: process.env.SENDER_PHONE || null,
+    company: process.env.SENDER_COMPANY || null,
+    street: process.env.SENDER_STREET || null,
+    number: process.env.SENDER_NUMBER || null,
+    complement: process.env.SENDER_COMPLEMENT || null,
+    neighborhood: process.env.SENDER_NEIGHBORHOOD || null,
+    city: process.env.SENDER_CITY || null,
+    state: process.env.SENDER_STATE || null,
+    postal_code: process.env.SENDER_POSTAL_CODE || null,
+    country: process.env.SENDER_COUNTRY || 'BR'
+  };
+}
+
+function buildVolumes(items, overrideVolumes) {
+  function normalizeWeightKg(raw) {
+    let w = Number(raw);
+    if (!Number.isFinite(w) || w <= 0) {
+      throw new Error('Peso inválido');
+    }
+    // Se aparentemente veio em gramas (ex.: 500 -> 0.5kg), converter
+    if (w >= 100) {
+      w = w / 1000;
+    }
+    // Limite de segurança: rejeitar pesos acima de 50kg
+    if (w > 50) {
+      throw new Error('Peso acima do limite permitido');
+    }
+    return Number(w.toFixed(3));
+  }
+
+  if (Array.isArray(overrideVolumes) && overrideVolumes.length > 0) {
+    return overrideVolumes.map(v => {
+      const height = Number(v.height);
+      const width = Number(v.width);
+      const length = Number(v.length);
+      const weight = normalizeWeightKg(v.weight);
+      if (!Number.isFinite(height) || !Number.isFinite(width) || !Number.isFinite(length)) {
+        throw new Error('Dimensões inválidas');
+      }
+      if (height <= 0 || width <= 0 || length <= 0) {
+        throw new Error('Dimensões devem ser positivas');
+      }
+      return { height, width, length, weight };
+    });
+  }
+  const height = Number(process.env.DEFAULT_PACKAGE_HEIGHT || 5);
+  const width = Number(process.env.DEFAULT_PACKAGE_WIDTH || 15);
+  const length = Number(process.env.DEFAULT_PACKAGE_LENGTH || 20);
+  const weight = normalizeWeightKg(process.env.DEFAULT_PACKAGE_WEIGHT || 0.5);
+  return [{ height, width, length, weight }];
+}
+
+router.post('/gerar-envio/:orderId', async (req, res) => {
+  try {
+    if (!process.env.MELHOR_ENVIO_TOKEN) {
+      return res.status(500).json({ error: 'Token do Melhor Envio não configurado' });
+    }
+
+    const { orderId } = req.params;
+    const { service, volumes, options } = req.body;
+
+    const { data: order, error: orderErr } = await supabaseAdmin
+      .from('orders')
+      .select('id, items, shipping_address, subtotal, total, shipping_cost, status, user_id, google_user_profile_id, user_info')
+      .eq('id', orderId)
+      .single();
+
+    if (orderErr || !order) {
+      return res.status(404).json({ error: 'Pedido não encontrado' });
+    }
+
+    let profile = null;
+    if (order.google_user_profile_id) {
+      const { data: gp } = await supabaseAdmin
+        .from('google_user_profiles')
+        .select('nome, cpf, data_nascimento')
+        .eq('id', order.google_user_profile_id)
+        .maybeSingle();
+      profile = gp || null;
+    }
+    if (!profile && order.user_id) {
+      const { data: up } = await supabaseAdmin
+        .from('user_profiles')
+        .select('name, cpf, birth_date, email, phone')
+        .eq('user_id', order.user_id)
+        .maybeSingle();
+      profile = up || null;
+    }
+
+    const addr = order.shipping_address || {};
+    const sender = buildSender();
+
+    const recipient = {
+      name: profile?.nome || profile?.name || order.user_info?.name || 'Cliente',
+      document: profile?.cpf || order.user_info?.cpf || null,
+      email: profile?.email || order.user_info?.email || null,
+      phone: profile?.phone || order.user_info?.phone || null,
+      company: null,
+      birth_date: profile?.data_nascimento || profile?.birth_date || null,
+      street: addr.logradouro || null,
+      number: String(addr.numero || ''),
+      complement: addr.complemento || null,
+      neighborhood: addr.bairro || null,
+      city: addr.cidade || null,
+      state: addr.estado || null,
+      postal_code: addr.cep || null,
+      country: 'BR'
+    };
+
+    const senderRequired = [sender.name, sender.postal_code, sender.street, sender.number, sender.city, sender.state, sender.country];
+    if (senderRequired.some(v => !v)) {
+      return res.status(400).json({ error: 'Dados de remetente incompletos' });
+    }
+
+    const vols = buildVolumes(order.items || [], volumes);
+    const insurance_value = typeof (options?.insurance_value) === 'number' ? options.insurance_value : (order.total ? Number(order.total) : null);
+
+    const { data: newShipment, error: insErr } = await supabaseAdmin
+      .from('melhor_envio_shipments')
+      .insert({
+        order_id: order.id,
+        cart_item_id: null,
+        service: Number(service) || 1,
+        status: 'cart',
+        sender_name: sender.name,
+        sender_document: sender.document,
+        sender_email: sender.email,
+        sender_phone: sender.phone,
+        sender_company: sender.company,
+        sender_street: sender.street,
+        sender_number: sender.number,
+        sender_complement: sender.complement,
+        sender_neighborhood: sender.neighborhood,
+        sender_city: sender.city,
+        sender_state: sender.state,
+        sender_postal_code: sender.postal_code,
+        sender_country: sender.country,
+        recipient_name: recipient.name,
+        recipient_document: recipient.document,
+        recipient_email: recipient.email,
+        recipient_phone: recipient.phone,
+        recipient_company: recipient.company,
+        recipient_birth_date: recipient.birth_date || null,
+        recipient_street: recipient.street,
+        recipient_number: recipient.number,
+        recipient_complement: recipient.complement,
+        recipient_neighborhood: recipient.neighborhood,
+        recipient_city: recipient.city,
+        recipient_state: recipient.state,
+        recipient_postal_code: recipient.postal_code,
+        recipient_country: recipient.country,
+        volumes: vols,
+        options: options || null,
+        insurance_value: insurance_value
+      })
+      .select()
+      .single();
+
+    if (insErr) {
+      return res.status(500).json({ error: 'Erro ao preparar envio' });
+    }
+
+    const meHeaders = {
+      Authorization: `Bearer ${process.env.MELHOR_ENVIO_TOKEN}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json'
+    };
+    const baseUrl = process.env.MELHOR_ENVIO_API_URL || 'https://melhorenvio.com.br/api/v2';
+
+    const cartPayload = {
+      service: Number(service) || 1,
+      from: {
+        name: sender.name,
+        postal_code: sender.postal_code,
+        address: sender.street,
+        number: sender.number,
+        complement: sender.complement,
+        city: sender.city,
+        state: sender.state,
+        country: sender.country,
+        email: sender.email,
+        document: sender.document,
+        phone: sender.phone
+      },
+      to: {
+        name: recipient.name,
+        postal_code: recipient.postal_code,
+        address: recipient.street,
+        number: recipient.number,
+        complement: recipient.complement,
+        city: recipient.city,
+        state: recipient.state,
+        country: recipient.country,
+        email: recipient.email,
+        document: recipient.document,
+        phone: recipient.phone
+      },
+      volumes: vols,
+      options: { insurance_value }
+    };
+
+    // Verificar saldo antes de adicionar ao carrinho
+    const balRes = await axios.get(`${baseUrl}/me/balance`, { headers: meHeaders });
+    function getAvailableBalance(b) {
+      if (b == null) return 0;
+      if (typeof b === 'number') return b;
+      if (typeof b === 'object') {
+        return Number(b.available || b.balance || b.amount || b.credit || 0);
+      }
+      return Number(b) || 0;
+    }
+    const available = getAvailableBalance(balRes?.data);
+    const expectedShipping = (order.shipping_cost && Number(order.shipping_cost) > 0)
+      ? Number(order.shipping_cost)
+      : Number(process.env.DEFAULT_MIN_SHIPPING || 10);
+    if (available < expectedShipping) {
+      return res.status(402).json({ error: 'Saldo insuficiente no Melhor Envio. Recarregue para prosseguir.' });
+    }
+
+    const cartRes = await axios.post(`${baseUrl}/me/cart`, cartPayload, { headers: meHeaders });
+    const itemId = cartRes?.data?.id || (Array.isArray(cartRes?.data) ? cartRes.data[0]?.id : null) || null;
+
+    await supabaseAdmin
+      .from('melhor_envio_shipments')
+      .update({ cart_item_id: itemId, status: 'cart' })
+      .eq('id', newShipment.id);
+
+    await axios.post(`${baseUrl}/me/shipment/checkout`, { orders: [itemId] }, { headers: meHeaders });
+    await supabaseAdmin
+      .from('melhor_envio_shipments')
+      .update({ status: 'paid', payment_status: 'paid' })
+      .eq('id', newShipment.id);
+
+    const genRes = await axios.post(`${baseUrl}/me/shipment/generate`, { orders: [itemId] }, { headers: meHeaders });
+    let trackingCode = null;
+    let labelUrl = null;
+    const ordersResp = genRes?.data?.orders || (Array.isArray(genRes?.data) ? genRes.data : []);
+    if (Array.isArray(ordersResp) && ordersResp.length > 0) {
+      trackingCode = ordersResp[0]?.tracking || null;
+      labelUrl = ordersResp[0]?.label?.url || null;
+    } else {
+      trackingCode = genRes?.data?.tracking || null;
+      labelUrl = genRes?.data?.label?.url || null;
+    }
+
+    await supabaseAdmin
+      .from('melhor_envio_shipments')
+      .update({ status: 'generated', tracking_code: trackingCode, label_url: labelUrl })
+      .eq('id', newShipment.id);
+
+    if (trackingCode) {
+      await supabaseAdmin
+        .from('orders')
+        .update({ tracking_code: trackingCode, status: 'processando' })
+        .eq('id', order.id);
+    }
+
+    const { data: orderItems } = await supabaseAdmin
+      .from('order_items')
+      .select('id, quantity')
+      .eq('order_id', order.id);
+
+    if (Array.isArray(orderItems) && orderItems.length > 0) {
+      const links = orderItems.map(oi => ({ shipment_id: newShipment.id, order_item_id: oi.id, quantity: oi.quantity }));
+      await supabaseAdmin.from('melhor_envio_shipment_items').insert(links);
+    }
+
+    return res.json({ success: true, shipment_id: newShipment.id, cart_item_id: itemId, tracking_code: trackingCode, label_url: labelUrl });
+  } catch (err) {
+    try {
+      const lastShipmentId = req?.params?.orderId ? (await supabaseAdmin
+        .from('melhor_envio_shipments')
+        .select('id')
+        .eq('order_id', req.params.orderId)
+        .order('created_at', { ascending: false })
+        .limit(1))?.data?.[0]?.id : null;
+      if (lastShipmentId) {
+        await supabaseAdmin
+          .from('melhor_envio_shipments')
+          .update({ status: 'error', error: err?.response?.data || { message: err.message } })
+          .eq('id', lastShipmentId);
+      }
+    } catch (_) {}
+    if (err?.response?.data) {
+      return res.status(500).json({ error: err.response.data });
+    }
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/pedido/:orderId/status-frete', async (req, res) => {
+  try {
+    if (!process.env.MELHOR_ENVIO_TOKEN) {
+      return res.status(500).json({ error: 'Token do Melhor Envio não configurado' });
+    }
+
+    const { orderId } = req.params;
+    const { data: shipments, error: shipErr } = await supabaseAdmin
+      .from('melhor_envio_shipments')
+      .select('*')
+      .eq('order_id', orderId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (shipErr || !shipments || shipments.length === 0) {
+      return res.status(404).json({ error: 'Envio não encontrado para este pedido' });
+    }
+    const shipment = shipments[0];
+
+    if (shipment.tracking_code) {
+      return res.json({
+        status: shipment.status,
+        tracking_code: shipment.tracking_code,
+        label_url: shipment.label_url,
+        shipment_id: shipment.id
+      });
+    }
+
+    const meHeaders = {
+      Authorization: `Bearer ${process.env.MELHOR_ENVIO_TOKEN}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json'
+    };
+    const baseUrl = process.env.MELHOR_ENVIO_API_URL || 'https://melhorenvio.com.br/api/v2';
+
+    const searchParams = {};
+    if (shipment.cart_item_id) {
+      searchParams.orders = [shipment.cart_item_id];
+    }
+
+    const resp = await axios.get(`${baseUrl}/me/shipment/search`, { headers: meHeaders, params: searchParams });
+    const ordersResp = resp?.data?.orders || (Array.isArray(resp?.data) ? resp.data : []);
+    let trackingCode = null;
+    let labelUrl = null;
+    if (Array.isArray(ordersResp)) {
+      const found = ordersResp.find(o => (o?.id && shipment.cart_item_id && String(o.id) === String(shipment.cart_item_id)) || (o?.tracking && o.tracking));
+      if (found) {
+        trackingCode = found.tracking || null;
+        labelUrl = found.label?.url || null;
+      }
+    }
+
+    if (trackingCode) {
+      await supabaseAdmin
+        .from('melhor_envio_shipments')
+        .update({ tracking_code: trackingCode, label_url: labelUrl, status: shipment.status === 'paid' ? 'generated' : shipment.status })
+        .eq('id', shipment.id);
+
+      await supabaseAdmin
+        .from('orders')
+        .update({ tracking_code: trackingCode })
+        .eq('id', orderId);
+
+      return res.json({
+        status: 'generated',
+        tracking_code: trackingCode,
+        label_url: labelUrl,
+        shipment_id: shipment.id
+      });
+    }
+
+    return res.json({
+      status: shipment.status,
+      tracking_code: null,
+      label_url: null,
+      shipment_id: shipment.id,
+      message: 'Rastreio ainda não disponível'
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error?.response?.data || error.message });
   }
 });
 
