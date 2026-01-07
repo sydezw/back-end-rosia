@@ -497,7 +497,7 @@ router.get('/orders', async (req, res) => {
       .from('orders')
       .select(`
         *,
-        user:user_id (
+        profile:user_id (
           email
         )
       `, { count: 'exact' });
@@ -545,10 +545,9 @@ router.get('/orders', async (req, res) => {
       });
     }
 
-    // Formatar resposta
     const formattedOrders = orders.map(order => ({
       id: order.id,
-      user_email: order.user?.email || 'N/A',
+      user_email: (order.profile && order.profile.email) ? order.profile.email : 'N/A',
       total: order.total,
       status: order.status,
       payment_method: order.payment_method,
@@ -585,7 +584,7 @@ router.get('/orders/:id', async (req, res) => {
       .from('orders')
       .select(`
         *,
-        user:user_id (
+        profile:user_id (
           email,
           created_at
         )
@@ -599,7 +598,9 @@ router.get('/orders/:id', async (req, res) => {
       });
     }
 
-    res.json({ order });
+    const userEmail = order && order.profile ? order.profile.email || null : null;
+
+    res.json({ order: { ...order, user_email: userEmail } });
   } catch (error) {
     console.error('Erro ao buscar pedido:', error);
     res.status(500).json({
