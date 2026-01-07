@@ -81,6 +81,20 @@ router.post('/auth/login', async (req, res, next) => {
 // Middleware de autenticação para todas as outras rotas administrativas
 router.use(authenticateAdmin);
 
+// Verificar token admin
+router.get('/auth/verify', async (req, res) => {
+  try {
+    res.json({
+      valid: !!req.isAdmin,
+      admin_id: req.adminId || null,
+      user_id: req.userId || null,
+      email: req.userEmail || null
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Erro interno' });
+  }
+});
+
 // Criar novo produto com imagens
 router.post('/products', uploadMultiple, validateProductData, processImage, async (req, res) => {
   try {
