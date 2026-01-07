@@ -274,34 +274,41 @@ const optionalAuth = async (req, res, next) => {
 const authenticateAdmin = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
-    
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ 
+      return res.status(401).json({
         error: 'Token de acesso requerido',
         code: 'MISSING_TOKEN'
       });
     }
 
-    const token = authHeader.substring(7); // Remove 'Bearer '
+    let token = authHeader.substring(7);
+    if (!token || token === 'undefined' || token === 'null') {
+      return res.status(401).json({
+        error: 'Token inválido',
+        code: 'INVALID_TOKEN'
+      });
+    }
 
-    // Verificar se é um admin_token (formato base64 com dados do admin)
+    token = token.trim().replace(/^"+|"+$/g, '').replace(/\s+/g, '');
+
     try {
-      const decoded = Buffer.from(token, 'base64').toString('utf-8');
-      const [adminId, email, timestamp] = decoded.split(':');
-      
-      if (adminId && email && timestamp) {
-        // Verificar se o token não expirou (24 horas)
-        const tokenAge = Date.now() - parseInt(timestamp);
-        const maxAge = 24 * 60 * 60 * 1000; // 24 horas
-        
+      const normalized = token.replace(/-/g, '+').replace(/_/g, '/');
+      const decoded = Buffer.from(normalized, 'base64').toString('utf-8');
+      const parts = decoded.split(':');
+      const adminId = parts[0];
+      const email = parts[1];
+      const timestamp = parts[2];
+
+      if (adminId && email && timestamp && String(timestamp).match(/^\d+$/)) {
+        const tokenAge = Date.now() - parseInt(timestamp, 10);
+        const maxAge = 24 * 60 * 60 * 1000;
         if (tokenAge > maxAge) {
-          return res.status(401).json({ 
+          return res.status(401).json({
             error: 'Token admin expirado',
             code: 'TOKEN_EXPIRED'
           });
         }
-        
-        // Verificar se o admin ainda está ativo
+
         const { data: adminCheck, error: adminError } = await supabase
           .from('admin_users')
           .select('id, email, user_id')
@@ -311,23 +318,19 @@ const authenticateAdmin = async (req, res, next) => {
           .single();
 
         if (adminError || !adminCheck) {
-          return res.status(403).json({ 
+          return res.status(403).json({
             error: 'Admin não encontrado ou inativo',
             code: 'ADMIN_INACTIVE'
           });
         }
 
-        // Adicionar dados do admin ao request
         req.adminId = adminCheck.id;
         req.userId = adminCheck.user_id;
         req.userEmail = adminCheck.email;
         req.isAdmin = true;
-        
         return next();
       }
-    } catch (decodeError) {
-      // Se não conseguir decodificar como admin_token, tenta como JWT do Supabase
-    }
+    } catch (e) {}
 
     // Verificar token JWT do Supabase (fallback para compatibilidade)
     const { data: { user }, error } = await supabase.auth.getUser(token);
