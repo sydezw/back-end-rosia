@@ -73,8 +73,20 @@ router.get('/', async (req, res, next) => {
       payment_method: order.payment_method
     }));
 
+    const orderIds = Array.isArray(orders) ? orders.map(o => o.id).filter(Boolean) : [];
+    let manualStatus = [];
+    if (orderIds.length > 0) {
+      const { data: manualRows } = await supabaseAdmin
+        .from('order_status_history')
+        .select('order_id,status')
+        .in('order_id', orderIds)
+        .eq('source', 'manual');
+      manualStatus = Array.isArray(manualRows) ? manualRows.map(r => ({ order_id: r.order_id, status: r.status })) : [];
+    }
+
     res.json({
       orders: formattedOrders,
+      manual_status: manualStatus,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -91,6 +103,105 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+router.get('/:id/payment/options', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const supabaseUserId = req.supabaseUser?.id || null;
+    const googleProfileId = req.user?.id || req.userId || null;
+    let order = null;
+    try {
+      const { data: byExact } = await supabaseAdmin
+        .from('orders')
+        .select('*')
+        .or(`id.eq.${id},external_reference.eq.${id},payment_id.eq.${id}`)
+        .maybeSingle();
+      order = byExact || null;
+    } catch {}
+    if (!order) {
+      try {
+        const short = (typeof id === 'string' ? id.split('-')[0] : '') || '';
+        const likePrefix = short.length >= 6 ? `${short}%` : `${id}%`;
+        const { data: byAlt } = await supabaseAdmin
+          .from('orders')
+          .select('*')
+          .or(`external_reference.eq.${id},payment_id.eq.${id},external_reference.ilike.${likePrefix}`)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        if (Array.isArray(byAlt) && byAlt.length > 0) order = byAlt[0];
+      } catch {}
+    }
+    if (!order || !(
+      (supabaseUserId && order.user_id === supabaseUserId) ||
+      (googleProfileId && order.google_user_profile_id === googleProfileId)
+    )) {
+      return res.status(404).json({ error: 'Pedido não encontrado', code: 'ORDER_NOT_FOUND' });
+    }
+    const status = String(order.status || '').toLowerCase();
+    const canPay = ['pendente', 'pagamento_rejeitado', 'rejected'].includes(status);
+    const methods = canPay ? ['credit_card','pix','ticket'] : [];
+    return res.json({
+      can_pay: canPay,
+      allowed_methods: methods,
+      order: {
+        id: order.id,
+        total: order.total,
+        status: order.status,
+        payment_method: order.payment_method || null,
+        payment_status: order.payment_status || null
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/:id/payment/reset', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const supabaseUserId = req.supabaseUser?.id || null;
+    const googleProfileId = req.user?.id || req.userId || null;
+    let order = null;
+    try {
+      const { data: byExact } = await supabaseAdmin
+        .from('orders')
+        .select('*')
+        .or(`id.eq.${id},external_reference.eq.${id},payment_id.eq.${id}`)
+        .maybeSingle();
+      order = byExact || null;
+    } catch {}
+    if (!order) {
+      try {
+        const short = (typeof id === 'string' ? id.split('-')[0] : '') || '';
+        const likePrefix = short.length >= 6 ? `${short}%` : `${id}%`;
+        const { data: byAlt } = await supabaseAdmin
+          .from('orders')
+          .select('*')
+          .or(`external_reference.eq.${id},payment_id.eq.${id},external_reference.ilike.${likePrefix}`)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        if (Array.isArray(byAlt) && byAlt.length > 0) order = byAlt[0];
+      } catch {}
+    }
+    if (!order || !(
+      (supabaseUserId && order.user_id === supabaseUserId) ||
+      (googleProfileId && order.google_user_profile_id === googleProfileId)
+    )) {
+      return res.status(404).json({ error: 'Pedido não encontrado', code: 'ORDER_NOT_FOUND' });
+    }
+    const status = String(order.status || '').toLowerCase();
+    const canPay = ['pendente', 'pagamento_rejeitado', 'rejected'].includes(status);
+    if (!canPay) {
+      return res.status(400).json({ error: 'Pedido não pode ser resetado para pagamento', code: 'ORDER_NOT_PAYABLE', current_status: order.status });
+    }
+    await supabaseAdmin
+      .from('orders')
+      .update({ payment_method: null, payment_status: null, updated_at: new Date().toISOString() })
+      .eq('id', order.id);
+    return res.json({ success: true, reset: true, allowed_methods: ['credit_card','pix','ticket'] });
+  } catch (error) {
+    next(error);
+  }
+});
 /**
  * GET /orders/:id
  * Busca detalhes de um pedido específico
@@ -188,6 +299,29 @@ router.get('/:id', async (req, res, next) => {
       }
     } catch {}
 
+    const { data: historyRows } = await supabaseAdmin
+      .from('order_status_history')
+      .select('status,notes,created_at,source')
+      .eq('order_id', order.id)
+      .eq('source', 'manual')
+      .order('created_at', { ascending: true });
+
+    const history = Array.isArray(historyRows) ? historyRows.map(h => ({ status: h.status, notes: h.notes, created_at: h.created_at })) : [];
+    const trackingFromNotes = (() => {
+      const reversed = history.slice().reverse();
+      for (const h of reversed) {
+        const t = typeof h.notes === 'string' ? h.notes.trim() : '';
+        if (!t) continue;
+        const m1 = t.match(/[A-Z]{2}\d{9}[A-Z]{2}/i);
+        if (m1) return m1[0];
+        const m2 = t.match(/\b\d{8,}\b/);
+        if (m2) return m2[0];
+        if (t.length >= 6) return t;
+      }
+      return null;
+    })();
+    const trackingCodeFinal = order.tracking_code || trackingFromNotes || null;
+
     const orderDetails = {
       id: order.id,
       external_reference: order.external_reference || order.payment_id || order.id,
@@ -202,8 +336,9 @@ router.get('/:id', async (req, res, next) => {
       items,
       created_at: order.created_at,
       updated_at: order.updated_at,
-      tracking_code: order.tracking_code || null,
-      estimated_delivery: order.estimated_delivery || null
+      tracking_code: trackingCodeFinal,
+      estimated_delivery: order.estimated_delivery || null,
+      status_history: history
     };
 
     res.json({ order: orderDetails });
@@ -376,24 +511,59 @@ router.get('/status/summary', async (req, res, next) => {
 router.get('/:id/tracking', async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.userId;
-    const { data: order, error } = await supabase
+    const supabaseUserId = req.supabaseUser?.id || null;
+    const googleProfileId = req.user?.id || req.userId || null;
+    const { data: order, error } = await supabaseAdmin
       .from('orders')
-      .select('id,status,tracking_code,estimated_delivery,updated_at,created_at')
-      .eq('user_id', userId)
+      .select('*')
       .or(`id.eq.${id},external_reference.eq.${id}`)
       .maybeSingle();
-    if (error || !order) {
+    if (error || !order || !(
+      (supabaseUserId && order.user_id === supabaseUserId) ||
+      (googleProfileId && order.google_user_profile_id === googleProfileId)
+    )) {
       return res.status(404).json({ error: 'Pedido não encontrado', code: 'ORDER_NOT_FOUND' });
+    }
+    const { data: historyRows } = await supabaseAdmin
+      .from('order_status_history')
+      .select('status,notes,created_at,source')
+      .eq('order_id', order.id)
+      .eq('source', 'manual')
+      .order('created_at', { ascending: true });
+    const history = Array.isArray(historyRows) ? historyRows.map(h => ({ status: h.status, notes: h.notes, created_at: h.created_at })) : [];
+    const trackingFromNotes = (() => {
+      const reversed = history.slice().reverse();
+      for (const h of reversed) {
+        const t = typeof h.notes === 'string' ? h.notes.trim() : '';
+        if (!t) continue;
+        const m1 = t.match(/[A-Z]{2}\d{9}[A-Z]{2}/i);
+        if (m1) return m1[0];
+        const m2 = t.match(/\b\d{8,}\b/);
+        if (m2) return m2[0];
+        if (t.length >= 6) return t;
+      }
+      return null;
+    })();
+    const trackingCodeFinal = order.tracking_code || trackingFromNotes || null;
+    const latestStatus = history && history.length ? (history[history.length - 1]?.status || order.status) : order.status;
+    const minimalFlag = String(req.query.minimal || req.query.min || req.query.simple || '').toLowerCase();
+    const minimal = ['1','true','yes','y'].includes(minimalFlag);
+    if (minimal) {
+      return res.json({
+        order_id: order.id,
+        order_id_short: typeof order.id === 'string' ? (order.id.split('-')[0] || order.id.slice(0, 8)) : null,
+        status: latestStatus
+      });
     }
     return res.json({
       tracking: {
         order_id: order.id,
-        status: order.status,
-        tracking_code: order.tracking_code || null,
+        status: latestStatus,
+        tracking_code: trackingCodeFinal,
         estimated_delivery: order.estimated_delivery || null,
         updated_at: order.updated_at,
-        created_at: order.created_at
+        created_at: order.created_at,
+        history
       }
     });
   } catch (error) {
@@ -404,16 +574,37 @@ router.get('/:id/tracking', async (req, res, next) => {
 router.post('/:id/reorder', async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.userId;
-    const { data: order, error: orderErr } = await supabase
-      .from('orders')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('id', id)
-      .single();
-    if (orderErr || !order) {
+    const supabaseUserId = req.supabaseUser?.id || null;
+    const googleProfileId = req.user?.id || req.userId || null;
+    let order = null;
+    try {
+      const { data: byExact } = await supabaseAdmin
+        .from('orders')
+        .select('*')
+        .or(`id.eq.${id},external_reference.eq.${id},payment_id.eq.${id}`)
+        .maybeSingle();
+      order = byExact || null;
+    } catch {}
+    if (!order) {
+      try {
+        const short = (typeof id === 'string' ? id.split('-')[0] : '') || '';
+        const likePrefix = short.length >= 6 ? `${short}%` : `${id}%`;
+        const { data: byAlt } = await supabaseAdmin
+          .from('orders')
+          .select('*')
+          .or(`external_reference.eq.${id},payment_id.eq.${id},external_reference.ilike.${likePrefix}`)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        if (Array.isArray(byAlt) && byAlt.length > 0) order = byAlt[0];
+      } catch {}
+    }
+    if (!order || !(
+      (supabaseUserId && order.user_id === supabaseUserId) ||
+      (googleProfileId && order.google_user_profile_id === googleProfileId)
+    )) {
       return res.status(404).json({ error: 'Pedido não encontrado', code: 'ORDER_NOT_FOUND' });
     }
+    
     let items = Array.isArray(order.items) ? order.items : [];
     if (!items || items.length === 0) {
       const { data: orderItems } = await supabase
@@ -428,16 +619,17 @@ router.post('/:id/reorder', async (req, res, next) => {
         selected_color: it.selected_color || null
       }));
     }
+    const userIdVar = googleProfileId || supabaseUserId;
     const { data: existingCart } = await supabaseAdmin
       .from('carts')
       .select('id')
-      .eq('user_id', userId)
+      .eq('user_id', userIdVar)
       .maybeSingle();
     let cartId = existingCart?.id;
     if (!cartId) {
       const { data: newCart, error: cartCreateError } = await supabaseAdmin
         .from('carts')
-        .insert({ user_id: userId })
+        .insert({ user_id: userIdVar })
         .select('id')
         .single();
       if (cartCreateError || !newCart) {
@@ -514,6 +706,59 @@ router.post('/:id/reorder', async (req, res, next) => {
       }
     }
     return res.status(201).json({ success: true, cart_id: cartId, added_count: added.length, skipped });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:id/retry', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const supabaseUserId = req.supabaseUser?.id || null;
+    const googleProfileId = req.user?.id || req.userId || null;
+    let order = null;
+    try {
+      const { data: byExact } = await supabaseAdmin
+        .from('orders')
+        .select('*')
+        .or(`id.eq.${id},external_reference.eq.${id},payment_id.eq.${id}`)
+        .maybeSingle();
+      order = byExact || null;
+    } catch {}
+    if (!order) {
+      try {
+        const short = (typeof id === 'string' ? id.split('-')[0] : '') || '';
+        const likePrefix = short.length >= 6 ? `${short}%` : `${id}%`;
+        const { data: byAlt } = await supabaseAdmin
+          .from('orders')
+          .select('*')
+          .or(`external_reference.eq.${id},payment_id.eq.${id},external_reference.ilike.${likePrefix}`)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        if (Array.isArray(byAlt) && byAlt.length > 0) order = byAlt[0];
+      } catch {}
+    }
+    if (!order || !(
+      (supabaseUserId && order.user_id === supabaseUserId) ||
+      (googleProfileId && order.google_user_profile_id === googleProfileId)
+    )) {
+      return res.status(404).json({ error: 'Pedido não encontrado', code: 'ORDER_NOT_FOUND' });
+    }
+    const status = String(order.status || '').toLowerCase();
+    const canPay = ['pendente', 'pagamento_rejeitado', 'rejected'].includes(status);
+    const items = Array.isArray(order.items) ? order.items : [];
+    return res.json({
+      can_pay: canPay,
+      order: {
+        id: order.id,
+        total: order.total,
+        status: order.status,
+        payment_status: order.payment_status || null,
+        payment_method: order.payment_method || null
+      },
+      items,
+      allowed_methods: canPay ? ['credit_card','pix','ticket'] : []
+    });
   } catch (error) {
     next(error);
   }

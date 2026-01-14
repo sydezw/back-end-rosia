@@ -1,5 +1,6 @@
 require('dotenv').config({ override: true });
 const express = require('express');
+const axios = require('axios');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
@@ -68,6 +69,12 @@ app.use((req, res, next) => {
   next();
 });
 
+console.log('🔧 Env CEPs:', {
+  SANDBOX_FORCE_FROM_CEP: process.env.SANDBOX_FORCE_FROM_CEP,
+  SANDBOX_FORCE_TO_CEP: process.env.SANDBOX_FORCE_TO_CEP,
+  SENDER_POSTAL_CODE: process.env.SENDER_POSTAL_CODE
+});
+
 // Configuração de CORS por ambiente
 const isDev = process.env.NODE_ENV !== 'production';
 const allowedOrigins = [
@@ -128,11 +135,59 @@ app.use('/api/payments,', express.raw({ type: 'application/json' }));
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/shipping', shippingRoutes);
+app.use('/shipping', shippingRoutes);
 app.use('/api/webhook', webhookRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/cep', cepRoutes);
 app.use('/api/debug', debugRoutes);
 app.use('/api', installmentsRoutes);
+
+// Alias público para cálculo pelo Melhor Envio sem prefixo /api
+app.post('/calculate-me', async (req, res) => {
+  try {
+    const rawToken = process.env.MELHOR_ENVIO_TOKEN || process.env.MELHOR_ENVIO_SECRET || '';
+    const token = typeof rawToken === 'string' ? rawToken.trim() : '';
+    if (!token) {
+      return res.status(500).json({ error: 'Token do Melhor Envio não configurado' });
+    }
+
+    function onlyDigits(v) { return (v == null ? '' : String(v)).replace(/\D/g, ''); }
+    const baseUrl = process.env.MELHOR_ENVIO_API_URL || 'https://sandbox.melhorenvio.com.br/api/v2';
+
+    const cepDestino = onlyDigits(req.body?.cepDestino || req.body?.cep || '');
+    if (!cepDestino || cepDestino.length !== 8) {
+      return res.status(400).json({ error: 'CEP de destino inválido' });
+    }
+
+    const height = Number(req.body?.altura) || Number(process.env.DEFAULT_PACKAGE_HEIGHT || 10);
+    const width = Number(req.body?.largura) || Number(process.env.DEFAULT_PACKAGE_WIDTH || 15);
+    const length = Number(req.body?.comprimento) || Number(process.env.DEFAULT_PACKAGE_LENGTH || 20);
+    const weight = Number(req.body?.peso) || Number(process.env.DEFAULT_PACKAGE_WEIGHT || 0.3);
+    const declared = Number(req.body?.valorDeclarado) || 0;
+
+    const forcedFrom = onlyDigits(process.env.SANDBOX_FORCE_FROM_CEP || process.env.SENDER_POSTAL_CODE || '07175530');
+
+    const volumes = [{ height, width, length, weight, products: declared > 0 ? [{ name: 'Conteúdo', quantity: 1, unitary_value: Number(declared) }] : [] }];
+    const options = { insurance_value: Number(declared) > 0 ? Number(declared) : 0, non_commercial: true };
+
+    const meHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': 'Rosia Backend (contato@rosia.com.br)' };
+    const payload = { from: { postal_code: forcedFrom, country_id: 'BR' }, to: { postal_code: cepDestino, country_id: 'BR' }, volumes, options };
+
+    const resp = await axios.post(`${baseUrl}/me/shipment/calculate`, payload, { headers: meHeaders });
+    const services = Array.isArray(resp?.data) ? resp.data : (resp?.data?.services || []);
+    const ok = services.filter(s => !s?.error);
+    const shippingOptions = ok.map(s => ({
+      id: Number(s.id || s.service || 0),
+      name: `${(s.company?.name || '').trim()}${s.name ? ` - ${String(s.name).trim()}` : ''}`.trim(),
+      price: Number(s.price || s.cost || s.value || s.final_price || 0),
+      delivery_time: s.delivery_range ? `${s.delivery_range.min}–${s.delivery_range.max} dias úteis` : (s.delivery_time || null),
+      company: s.company?.name || null
+    }));
+    return res.json({ cep_origem: forcedFrom, cep_destino: cepDestino, shipping_options: shippingOptions, volumes, options });
+  } catch (error) {
+    return res.status(500).json({ error: error?.response?.data || error.message });
+  }
+});
 
 // Rotas protegidas
 app.use('/api/orders', authenticateSupabaseGoogleUser, orderRoutes);

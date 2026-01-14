@@ -13,6 +13,7 @@ const {
   generateUniqueFilename
 } = require('../config/storage');
 const { supabase, supabaseAdmin } = require('../config/supabase');
+const shippingController = require('../controllers/shippingController');
 
 /**
  * POST /admin/auth/login
@@ -545,18 +546,84 @@ router.get('/orders', async (req, res) => {
       });
     }
 
-    const formattedOrders = orders.map(order => ({
-      id: order.id,
-      user_email: (order.profile && order.profile.email) ? order.profile.email : 'N/A',
-      total: order.total,
-      status: order.status,
-      payment_method: order.payment_method,
-      items_count: order.items ? order.items.length : 0,
-      created_at: order.created_at,
-      updated_at: order.updated_at,
-      shipping_address: order.shipping_address,
-      tracking_code: order.tracking_code
-    }));
+    const includeDebug = String(req.query.debug || '').toLowerCase() === 'true';
+
+    const orderIds = Array.isArray(orders) ? orders.map(o => o.id) : [];
+    let itemsMap = {};
+    if (orderIds.length > 0) {
+      const { data: orderItemsData } = await supabaseAdmin
+        .from('order_items')
+        .select('order_id, product_name, unit_price, quantity')
+        .in('order_id', orderIds);
+      if (Array.isArray(orderItemsData)) {
+        for (const oi of orderItemsData) {
+          const key = oi.order_id;
+          if (!itemsMap[key]) itemsMap[key] = [];
+          itemsMap[key].push({
+            name: oi.product_name || 'Produto',
+            quantity: Number(oi.quantity) || 1,
+            unitary_value: Number(oi.unit_price) || 0
+          });
+        }
+      }
+    }
+    const formattedOrders = orders.map(order => {
+      let products = itemsMap[order.id] || [];
+      if ((!Array.isArray(products) || products.length === 0) && Array.isArray(order.items)) {
+        products = order.items.map(it => {
+          const qty = Number(it.quantity) || 1;
+          const unit = it.product_price != null ? Number(it.product_price) : (it.total != null ? Number(it.total) / qty : 0);
+          return { name: it.product_name || it.name || 'Produto', quantity: qty, unitary_value: Number(unit) };
+        }).filter(p => p.quantity > 0 && p.unitary_value > 0);
+      }
+      const computed = {
+        name: order.user_info?.nome || order.shipping_address?.name || null,
+        cpf: order.user_info?.cpf || null,
+        email: (order.profile && order.profile.email) ? order.profile.email : order.user_info?.email || null,
+        phone: order.user_info?.telefone || order.shipping_address?.phone || null,
+        address: order.shipping_address?.logradouro || order.shipping_address?.address || null,
+        number: order.shipping_address?.numero || order.shipping_address?.number || null,
+        district: order.shipping_address?.bairro || order.shipping_address?.district || null,
+        city: order.shipping_address?.cidade || order.shipping_address?.city || null,
+        state_abbr: order.shipping_address?.estado || order.shipping_address?.state_abbr || null,
+        postal_code: order.shipping_address?.cep || order.shipping_address?.postal_code || null
+      };
+
+      const base = {
+        id: order.id,
+        order_id: order.id,
+        name: computed.name || 'N/A',
+        cpf: computed.cpf || 'N/A',
+        email: computed.email || 'N/A',
+        phone: computed.phone || 'N/A',
+        address: computed.address || 'N/A',
+        number: computed.number || 'N/A',
+        district: computed.district || 'N/A',
+        city: computed.city || 'N/A',
+        state_abbr: computed.state_abbr || 'N/A',
+        postal_code: computed.postal_code || 'N/A',
+        total: order.total,
+        status: order.status,
+        payment_method: order.payment_method,
+        payment_status: order.payment_status,
+        items_count: Array.isArray(products) ? products.length : (order.items ? order.items.length : 0),
+        products,
+        created_at: order.created_at,
+        updated_at: order.updated_at,
+        shipping_address: order.shipping_address,
+        tracking_code: order.tracking_code
+      };
+
+      return includeDebug ? {
+        ...base,
+        debug: {
+          raw_user_info: order.user_info || null,
+          raw_shipping_address: order.shipping_address || null,
+          profile: order.profile || null,
+          computed
+        }
+      } : base;
+    });
 
     res.json({
       orders: formattedOrders,
@@ -688,6 +755,20 @@ router.put('/orders/:id/status', async (req, res) => {
       });
     }
 
+    try {
+      const notesValue = tracking_code || req.body?.notes || null;
+      await supabaseAdmin
+        .from('order_status_history')
+        .insert({
+          order_id: id,
+          status,
+          notes: notesValue,
+          current_total: currentOrder.total || null,
+          current_items: Array.isArray(currentOrder.items) ? currentOrder.items : null,
+          source: 'manual'
+        });
+    } catch (_) {}
+
     res.json({
       message: 'Status do pedido atualizado com sucesso',
       order: updatedOrder
@@ -797,18 +878,18 @@ router.get('/dashboard/sales', async (req, res) => {
 
 function buildSender() {
   return {
-    name: process.env.SENDER_NAME || null,
-    document: process.env.SENDER_DOCUMENT || null,
-    email: process.env.SENDER_EMAIL || null,
-    phone: process.env.SENDER_PHONE || null,
+    name: process.env.SENDER_NAME || 'Melissa Marques de Santana',
+    document: process.env.SENDER_DOCUMENT || '51022073850',
+    email: process.env.SENDER_EMAIL || 'rosia_oficial@outlook.com',
+    phone: process.env.SENDER_PHONE || '11945549955',
     company: process.env.SENDER_COMPANY || null,
-    street: process.env.SENDER_STREET || null,
-    number: process.env.SENDER_NUMBER || null,
+    street: process.env.SENDER_STREET || 'Rua Tapiramuta',
+    number: process.env.SENDER_NUMBER || '41',
     complement: process.env.SENDER_COMPLEMENT || null,
-    neighborhood: process.env.SENDER_NEIGHBORHOOD || null,
-    city: process.env.SENDER_CITY || null,
-    state: process.env.SENDER_STATE || null,
-    postal_code: process.env.SENDER_POSTAL_CODE || null,
+    neighborhood: process.env.SENDER_NEIGHBORHOOD || 'Vila Nova Bonsucesso',
+    city: process.env.SENDER_CITY || 'Guarulhos',
+    state: process.env.SENDER_STATE || 'SP',
+    postal_code: process.env.SENDER_POSTAL_CODE || '07175530',
     country: process.env.SENDER_COUNTRY || 'BR'
   };
 }
@@ -854,12 +935,15 @@ function buildVolumes(items, overrideVolumes) {
 
 router.post('/gerar-envio/:orderId', async (req, res) => {
   try {
-    if (!process.env.MELHOR_ENVIO_TOKEN) {
+    const rawToken = process.env.MELHOR_ENVIO_TOKEN || process.env.MELHOR_ENVIO_SECRET || '';
+    const token = typeof rawToken === 'string' ? rawToken.trim() : '';
+    if (!token) {
       return res.status(500).json({ error: 'Token do Melhor Envio não configurado' });
     }
 
     const { orderId } = req.params;
-    const { service, volumes, options } = req.body;
+    const { service, service_id, volumes, package: pkg, options, products: productsInput, receiver } = req.body;
+    console.log('ID RECEBIDO NO BACKEND:', Number(service_id ?? service));
 
     const { data: order, error: orderErr } = await supabaseAdmin
       .from('orders')
@@ -869,6 +953,32 @@ router.post('/gerar-envio/:orderId', async (req, res) => {
 
     if (orderErr || !order) {
       return res.status(404).json({ error: 'Pedido não encontrado' });
+    }
+
+    const { data: existingShipments } = await supabaseAdmin
+      .from('melhor_envio_shipments')
+      .select('id, status, tracking_code, label_url, me_shipment_id, cart_item_id')
+      .eq('order_id', order.id)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (Array.isArray(existingShipments) && existingShipments.length > 0) {
+      const s = existingShipments[0];
+      const st = String(s.status || '').toLowerCase();
+      const blocking = ['cart','released','paid','generated','pronto_para_envio','enviado','processando_me','aguardando'];
+      const hasProgress = !!(s.tracking_code || s.label_url || s.me_shipment_id || s.cart_item_id) || blocking.includes(st);
+      if (hasProgress) {
+        return res.status(400).json({
+          success: false,
+          message: 'Já existe um envio gerado para este pedido. Verifique a aba de etiquetas.',
+          shipment: {
+            id: s.id,
+            status: s.status,
+            tracking_code: s.tracking_code || null,
+            label_url: s.label_url || null,
+            me_id: s.me_shipment_id || null
+          }
+        });
+      }
     }
 
     let profile = null;
@@ -890,13 +1000,27 @@ router.post('/gerar-envio/:orderId', async (req, res) => {
     }
 
     const addr = order.shipping_address || {};
-    const sender = buildSender();
+    let sender = buildSender();
+    sender = {
+      ...sender,
+      name: sender.name || 'Melissa Marques de Santana',
+      document: sender.document || '51022073850',
+      email: sender.email || 'rosia_oficial@outlook.com',
+      phone: sender.phone || '11945549955',
+      street: sender.street || 'Rua Tapiramuta',
+      number: String(sender.number || '41'),
+      neighborhood: sender.neighborhood || 'Vila Nova Bonsucesso',
+      city: sender.city || 'Guarulhos',
+      state: sender.state || 'SP',
+      postal_code: sender.postal_code || '07175530',
+      country: sender.country || 'BR'
+    };
 
-    const recipient = {
-      name: profile?.nome || profile?.name || order.user_info?.name || 'Cliente',
+    let recipient = {
+      name: profile?.nome || profile?.name || order.user_info?.nome || 'Cliente',
       document: profile?.cpf || order.user_info?.cpf || null,
       email: profile?.email || order.user_info?.email || null,
-      phone: profile?.phone || order.user_info?.phone || null,
+      phone: profile?.phone || order.user_info?.telefone || process.env.DEFAULT_RECIPIENT_PHONE || '11999999999',
       company: null,
       birth_date: profile?.data_nascimento || profile?.birth_date || null,
       street: addr.logradouro || null,
@@ -908,21 +1032,46 @@ router.post('/gerar-envio/:orderId', async (req, res) => {
       postal_code: addr.cep || null,
       country: 'BR'
     };
+    const receiverBody = receiver || req.body?.receiver || {};
+    recipient = {
+      ...recipient,
+      name: receiverBody.name ?? recipient.name,
+      document: receiverBody.cpf ?? receiverBody.document ?? recipient.document,
+      email: receiverBody.email ?? recipient.email,
+      phone: receiverBody.phone ?? recipient.phone,
+      street: receiverBody.address ?? receiverBody.street ?? recipient.street,
+      number: String(receiverBody.number ?? recipient.number ?? ''),
+      complement: receiverBody.complement ?? recipient.complement,
+      neighborhood: receiverBody.district ?? receiverBody.neighborhood ?? recipient.neighborhood,
+      city: receiverBody.city ?? recipient.city,
+      state: receiverBody.state_abbr ?? receiverBody.state ?? recipient.state,
+      postal_code: receiverBody.postal_code ? String(receiverBody.postal_code) : recipient.postal_code,
+      country: 'BR'
+    };
 
     const senderRequired = [sender.name, sender.postal_code, sender.street, sender.number, sender.city, sender.state, sender.country];
     if (senderRequired.some(v => !v)) {
+      console.log('❌ Sender incompleto:', sender);
       return res.status(400).json({ error: 'Dados de remetente incompletos' });
     }
+    if (onlyDigits(sender.postal_code) === onlyDigits(recipient.postal_code)) {
+      return res.status(422).json({ error: 'Origem e destino não podem ser iguais' });
+    }
 
-    const vols = buildVolumes(order.items || [], volumes);
-    const insurance_value = typeof (options?.insurance_value) === 'number' ? options.insurance_value : (order.total ? Number(order.total) : null);
+    const overrideVolumes = (Array.isArray(volumes) && volumes.length > 0)
+      ? volumes
+      : (pkg ? [pkg] : null);
+    const vols = buildVolumes(order.items || [], overrideVolumes);
+    let insurance_value = typeof (options?.insurance_value) === 'number'
+      ? options.insurance_value
+      : (typeof (pkg?.insurance_value) === 'number' ? pkg.insurance_value : (order.total ? Number(order.total) : null));
 
     const { data: newShipment, error: insErr } = await supabaseAdmin
       .from('melhor_envio_shipments')
       .insert({
         order_id: order.id,
         cart_item_id: null,
-        service: Number(service) || 1,
+        service: Number(service_id ?? service) || 1,
         status: 'cart',
         sender_name: sender.name,
         sender_document: sender.document,
@@ -963,46 +1112,115 @@ router.post('/gerar-envio/:orderId', async (req, res) => {
     }
 
     const meHeaders = {
-      Authorization: `Bearer ${process.env.MELHOR_ENVIO_TOKEN}`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
-      Accept: 'application/json'
+      Accept: 'application/json',
+      'User-Agent': 'Rosia Backend (contato@rosia.com.br)'
     };
-    const baseUrl = process.env.MELHOR_ENVIO_API_URL || 'https://melhorenvio.com.br/api/v2';
+    const rawBaseUrlCalc = (process.env.MELHOR_ENVIO_API_URL || 'https://sandbox.melhorenvio.com.br/api/v2').trim().replace(/\/$/, '');
+    const baseUrl = rawBaseUrlCalc.includes('/api/v2') ? rawBaseUrlCalc.replace(/\/api\/v2.*$/, '/api/v2') : `${rawBaseUrlCalc}/api/v2`;
 
+    function normalizeMoney(v) {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return 0;
+      return Number(n.toFixed(2));
+    }
+    let productsPayload = [];
+    if (Array.isArray(productsInput) && productsInput.length > 0) {
+      productsPayload = productsInput.map(p => ({
+        name: p.name || 'Produto Comercial',
+        quantity: Number(p.quantity) || 1,
+        unitary_value: normalizeMoney(p.unitary_value)
+      })).filter(p => (p.quantity || 0) > 0 && (p.unitary_value || 0) > 0);
+    } else {
+      const { data: orderItemsData } = await supabaseAdmin
+        .from('order_items')
+        .select('product_name, unit_price, quantity')
+        .eq('order_id', order.id);
+      if (Array.isArray(orderItemsData) && orderItemsData.length > 0) {
+        productsPayload = orderItemsData.map(oi => ({
+          name: oi.product_name || 'Produto Comercial',
+          quantity: Number(oi.quantity) || 1,
+          unitary_value: normalizeMoney(oi.unit_price)
+        })).filter(p => (p.quantity || 0) > 0 && (p.unitary_value || 0) > 0);
+      } else if (Array.isArray(order.items) && order.items.length > 0) {
+        productsPayload = order.items.map(it => {
+          const qtyNum = Number(it.quantity) || 1;
+          const unitNum = it.product_price != null
+            ? normalizeMoney(it.product_price)
+            : (it.total != null ? normalizeMoney(Number(it.total) / (qtyNum || 1)) : 0);
+          const name = it.product_name || it.name || 'Produto Comercial';
+          const quantity = qtyNum;
+          const unitary_value = unitNum;
+          return { name, quantity, unitary_value };
+        }).filter(p => (p.quantity || 0) > 0 && (p.unitary_value || 0) > 0);
+      }
+    }
+    if (!Array.isArray(productsPayload) || productsPayload.length === 0) {
+      const tot = normalizeMoney(order.total || order.subtotal || 0);
+      productsPayload = [{ name: `Pedido ${order.id}`, quantity: 1, unitary_value: tot }];
+    }
+    const cleanProducts = productsPayload.map(p => ({
+      name: String(p.name || '').substring(0, 50),
+      quantity: Number(p.quantity),
+      unitary_value: Number(p.unitary_value)
+    }));
+    const declaredTotal = cleanProducts.reduce((sum, p) => sum + (Number(p.unitary_value) * Number(p.quantity)), 0);
+    insurance_value = normalizeMoney(declaredTotal || insurance_value || 0);
+    const finalVolumes = (Array.isArray(vols) ? vols : []).map(v => ({
+      height: Number(v.height),
+      width: Number(v.width),
+      length: Number(v.length),
+      weight: Number(v.weight)
+    }));
+
+    function onlyDigits(v) { return (v == null ? '' : String(v)).replace(/\D/g, ''); }
+    const forcedFromPostal = onlyDigits(process.env.SANDBOX_FORCE_FROM_CEP || '');
+    const forcedToPostal = onlyDigits(process.env.SANDBOX_FORCE_TO_CEP || '');
+    console.log('📦 Sender usado no carrinho:', sender);
     const cartPayload = {
-      service: Number(service) || 1,
+      service: Number(service_id ?? service) || Number(process.env.SANDBOX_DEFAULT_SERVICE || 3),
       from: {
         name: sender.name,
-        postal_code: sender.postal_code,
+        postal_code: onlyDigits(sender.postal_code),
         address: sender.street,
         number: sender.number,
         complement: sender.complement,
+        district: sender.neighborhood,
         city: sender.city,
-        state: sender.state,
+        state_abbr: sender.state,
         country: sender.country,
+        country_id: 'BR',
         email: sender.email,
-        document: sender.document,
-        phone: sender.phone
+        document: onlyDigits(sender.document),
+        phone: onlyDigits(sender.phone)
       },
       to: {
         name: recipient.name,
-        postal_code: recipient.postal_code,
+        postal_code: onlyDigits(recipient.postal_code),
         address: recipient.street,
         number: recipient.number,
         complement: recipient.complement,
+        district: recipient.neighborhood,
         city: recipient.city,
-        state: recipient.state,
+        state_abbr: recipient.state,
         country: recipient.country,
+        country_id: 'BR',
         email: recipient.email,
-        document: recipient.document,
-        phone: recipient.phone
+        document: onlyDigits(recipient.document || ''),
+        phone: onlyDigits(recipient.phone)
       },
-      volumes: vols,
-      options: { insurance_value }
+      volumes: finalVolumes,
+      products: cleanProducts.map(p => ({
+        name: p.name,
+        quantity: String(p.quantity),
+        unitary_value: String(Number(p.unitary_value))
+      })),
+      options: { insurance_value: Number(insurance_value), non_commercial: true }
     };
 
     // Verificar saldo antes de adicionar ao carrinho
-    const balRes = await axios.get(`${baseUrl}/me/balance`, { headers: meHeaders });
+    const balRes = await axios.get(`${baseUrl}/me/balance`, { headers: { ...meHeaders, 'User-Agent': 'Rosia Backend (contato@rosia.com.br)' } });
     function getAvailableBalance(b) {
       if (b == null) return 0;
       if (typeof b === 'number') return b;
@@ -1019,7 +1237,32 @@ router.post('/gerar-envio/:orderId', async (req, res) => {
       return res.status(402).json({ error: 'Saldo insuficiente no Melhor Envio. Recarregue para prosseguir.' });
     }
 
-    const cartRes = await axios.post(`${baseUrl}/me/cart`, cartPayload, { headers: meHeaders });
+    try {
+      const quotePayload = { from: cartPayload.from, to: cartPayload.to, volumes: cartPayload.volumes, options: { insurance_value: Number(insurance_value), non_commercial: true } };
+      const quoteRes = await axios.post(`${baseUrl}/me/shipment/calculate`, quotePayload, { headers: { ...meHeaders, 'User-Agent': 'Rosia Backend (contato@rosia.com.br)' } });
+      const services = Array.isArray(quoteRes?.data) ? quoteRes.data : (quoteRes?.data?.services || []);
+      if (!Array.isArray(services) || services.length === 0) {
+        return res.status(422).json({ error: 'Transportadora não atende este trecho', details: quoteRes?.data || null });
+      }
+      const providedServiceId = Number(service_id ?? service) || 0;
+      const exists = providedServiceId > 0 && services.some(s => Number(s.id || s.service) === providedServiceId);
+      if (exists) {
+        cartPayload.service = providedServiceId;
+      } else {
+        const preferred = services.find(s => /Jadlog|Correios/i.test((s.company?.name || s.name || ''))) || services[0];
+        const svcId = Number(preferred?.id || preferred?.service || 0);
+        if (svcId > 0) {
+          cartPayload.service = svcId;
+        } else {
+          cartPayload.service = Number(process.env.SANDBOX_DEFAULT_SERVICE || 3);
+        }
+      }
+    } catch (e) {
+      console.error('COTACAO_ERROR', e?.response?.data || e.message);
+      cartPayload.service = Number(process.env.SANDBOX_DEFAULT_SERVICE || 3);
+    }
+    console.log('ENVIANDO PAYLOAD CORRIGIDO:', JSON.stringify(cartPayload));
+    const cartRes = await axios.post(`${baseUrl}/me/cart`, cartPayload, { headers: { ...meHeaders, 'User-Agent': 'Rosia Backend (contato@rosia.com.br)' } });
     const itemId = cartRes?.data?.id || (Array.isArray(cartRes?.data) ? cartRes.data[0]?.id : null) || null;
 
     await supabaseAdmin
@@ -1027,27 +1270,36 @@ router.post('/gerar-envio/:orderId', async (req, res) => {
       .update({ cart_item_id: itemId, status: 'cart' })
       .eq('id', newShipment.id);
 
-    await axios.post(`${baseUrl}/me/shipment/checkout`, { orders: [itemId] }, { headers: meHeaders });
+    const checkoutRes = await axios.post(`${baseUrl}/me/shipment/checkout`, { orders: [itemId] }, { headers: meHeaders });
+    console.log('DEBUG CHECKOUT ME:', JSON.stringify(checkoutRes.data, null, 2));
+    const realId = checkoutRes?.data?.purchase?.orders?.[0]?.id || checkoutRes?.data?.orders?.[0]?.id || null;
     await supabaseAdmin
       .from('melhor_envio_shipments')
-      .update({ status: 'paid', payment_status: 'paid' })
+      .update({ status: 'released', payment_status: 'paid', me_shipment_id: realId })
       .eq('id', newShipment.id);
 
-    const genRes = await axios.post(`${baseUrl}/me/shipment/generate`, { orders: [itemId] }, { headers: meHeaders });
+    const genRes = await axios.post(`${baseUrl}/me/shipment/generate`, { orders: [realId || itemId] }, { headers: meHeaders });
     let trackingCode = null;
     let labelUrl = null;
-    const ordersResp = genRes?.data?.orders || (Array.isArray(genRes?.data) ? genRes.data : []);
-    if (Array.isArray(ordersResp) && ordersResp.length > 0) {
-      trackingCode = ordersResp[0]?.tracking || null;
-      labelUrl = ordersResp[0]?.label?.url || null;
+    const dynamicId = (realId || itemId) || null;
+    const responseData = dynamicId && genRes?.data && typeof genRes.data === 'object' ? genRes.data[dynamicId] : null;
+    if (responseData && typeof responseData === 'object') {
+      trackingCode = responseData?.tracking || null;
+      labelUrl = responseData?.label_url || (responseData?.label?.url || null);
     } else {
-      trackingCode = genRes?.data?.tracking || null;
-      labelUrl = genRes?.data?.label?.url || null;
+      const ordersResp = genRes?.data?.orders || (Array.isArray(genRes?.data) ? genRes.data : []);
+      if (Array.isArray(ordersResp) && ordersResp.length > 0) {
+        trackingCode = ordersResp[0]?.tracking || null;
+        labelUrl = ordersResp[0]?.label?.url || null;
+      } else {
+        trackingCode = genRes?.data?.tracking || genRes?.data?.protocol || null;
+        labelUrl = genRes?.data?.label_url || genRes?.data?.label?.url || null;
+      }
     }
 
     await supabaseAdmin
       .from('melhor_envio_shipments')
-      .update({ status: 'generated', tracking_code: trackingCode, label_url: labelUrl })
+      .update({ status: 'pronto_para_envio', tracking_code: trackingCode, label_url: labelUrl })
       .eq('id', newShipment.id);
 
     if (trackingCode) {
@@ -1067,8 +1319,9 @@ router.post('/gerar-envio/:orderId', async (req, res) => {
       await supabaseAdmin.from('melhor_envio_shipment_items').insert(links);
     }
 
-    return res.json({ success: true, shipment_id: newShipment.id, cart_item_id: itemId, tracking_code: trackingCode, label_url: labelUrl });
+    return res.json({ success: true, shipment_id: newShipment.id, cart_item_id: itemId, tracking_code: trackingCode, label_url: labelUrl, me_id: realId || null, status: 'pronto_para_envio', payment_status: 'paid' });
   } catch (err) {
+    console.error('ERRO DETALHADO DA API:', err?.response?.data || err.message);
     try {
       const lastShipmentId = req?.params?.orderId ? (await supabaseAdmin
         .from('melhor_envio_shipments')
@@ -1083,16 +1336,24 @@ router.post('/gerar-envio/:orderId', async (req, res) => {
           .eq('id', lastShipmentId);
       }
     } catch (_) {}
-    if (err?.response?.data) {
-      return res.status(500).json({ error: err.response.data });
+    const statusCode = err?.response?.status || 500;
+    if (statusCode === 422) {
+      const hasProductsError = !!err?.response?.data?.errors?.products;
+      const message = hasProductsError ? 'Erro: Verifique se os produtos do pedido estão cadastrados corretamente' : (err?.response?.data?.message || 'Erro de validação');
+      return res.status(422).json({ error: message, details: err?.response?.data });
     }
-    return res.status(500).json({ error: err.message });
+    if (err?.response?.data) {
+      return res.status(statusCode).json({ error: err.response.data });
+    }
+    return res.status(statusCode).json({ error: err.message });
   }
 });
 
 router.get('/pedido/:orderId/status-frete', async (req, res) => {
   try {
-    if (!process.env.MELHOR_ENVIO_TOKEN) {
+    const rawToken = process.env.MELHOR_ENVIO_TOKEN || process.env.MELHOR_ENVIO_SECRET || '';
+    const token = typeof rawToken === 'string' ? rawToken.trim() : '';
+    if (!token) {
       return res.status(500).json({ error: 'Token do Melhor Envio não configurado' });
     }
 
@@ -1102,50 +1363,83 @@ router.get('/pedido/:orderId/status-frete', async (req, res) => {
       .select('*')
       .eq('order_id', orderId)
       .order('created_at', { ascending: false })
-      .limit(1);
+      .limit(5);
 
     if (shipErr || !shipments || shipments.length === 0) {
       return res.status(404).json({ error: 'Envio não encontrado para este pedido' });
     }
-    const shipment = shipments[0];
+    const shipment = shipments.find(s => !!s.tracking_code) || shipments[0];
 
     if (shipment.tracking_code) {
+      const mappedStatus = shipment.status === 'paid' ? 'aguardando' : (shipment.status === 'generated' ? 'pronto_para_envio' : shipment.status);
       return res.json({
-        status: shipment.status,
+        success: true,
+        status: mappedStatus,
         tracking_code: shipment.tracking_code,
+        tracking: shipment.tracking_code,
         label_url: shipment.label_url,
         shipment_id: shipment.id
       });
     }
 
     const meHeaders = {
-      Authorization: `Bearer ${process.env.MELHOR_ENVIO_TOKEN}`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
-      Accept: 'application/json'
+      Accept: 'application/json',
+      'User-Agent': 'Rosia Backend (contato@rosia.com.br)'
     };
-    const baseUrl = process.env.MELHOR_ENVIO_API_URL || 'https://melhorenvio.com.br/api/v2';
+    const rawBaseUrlPedido = (process.env.MELHOR_ENVIO_API_URL || 'https://sandbox.melhorenvio.com.br/api/v2').trim().replace(/\/$/, '');
+    const baseUrl = rawBaseUrlPedido.includes('/api/v2') ? rawBaseUrlPedido.replace(/\/api\/v2.*$/, '/api/v2') : `${rawBaseUrlPedido}/api/v2`;
 
     const searchParams = {};
     if (shipment.cart_item_id) {
       searchParams.orders = [shipment.cart_item_id];
     }
 
-    const resp = await axios.get(`${baseUrl}/me/shipment/search`, { headers: meHeaders, params: searchParams });
-    const ordersResp = resp?.data?.orders || (Array.isArray(resp?.data) ? resp.data : []);
+    let ordersResp = [];
+    try {
+      const resp = await axios.get(`${baseUrl}/me/orders/search`, { headers: meHeaders, params: searchParams });
+      ordersResp = resp?.data?.orders || (Array.isArray(resp?.data) ? resp.data : []);
+    } catch (err) {
+      return res.status(202).json({ success: false, status: 'processing', message: 'Etiqueta em processamento no Melhor Envio. Tente novamente em 1 minuto.' });
+    }
     let trackingCode = null;
     let labelUrl = null;
+    let newStatus = shipment.status;
     if (Array.isArray(ordersResp)) {
       const found = ordersResp.find(o => (o?.id && shipment.cart_item_id && String(o.id) === String(shipment.cart_item_id)) || (o?.tracking && o.tracking));
       if (found) {
         trackingCode = found.tracking || null;
-        labelUrl = found.label?.url || null;
+        labelUrl = found.label?.url || found.label_url || null;
+        const externalStatus = found?.status || null;
+        if (externalStatus) {
+          const statusMap = { pending: 'aguardando', released: 'pronto_para_envio', posted: 'enviado', delivered: 'entregue', undelivered: 'devolvido', suspended: 'cancelado' };
+          newStatus = statusMap[String(externalStatus).toLowerCase()] || newStatus;
+        }
+        if (!labelUrl && (found?.id || shipment?.me_shipment_id || shipment?.cart_item_id)) {
+          try {
+            const idToPrint = found?.id || shipment?.me_shipment_id;
+            const printRes = await axios.post(`${baseUrl}/me/shipment/print`, { orders: [idToPrint] }, { headers: meHeaders });
+            const printData = idToPrint && printRes?.data && typeof printRes.data === 'object' ? (printRes.data[idToPrint] || null) : null;
+            if (printData && typeof printData === 'object') {
+              labelUrl = printData?.label_url || printData?.label?.url || labelUrl;
+            } else {
+              const printOrders = printRes?.data?.orders || (Array.isArray(printRes?.data) ? printRes.data : []);
+              if (Array.isArray(printOrders) && printOrders.length > 0) {
+                labelUrl = printOrders[0]?.label?.url || printOrders[0]?.label_url || labelUrl;
+              }
+            }
+          } catch (e) {
+            console.error('Erro ao obter label via print:', e?.response?.data || e?.message);
+          }
+        }
       }
     }
 
     if (trackingCode) {
       await supabaseAdmin
         .from('melhor_envio_shipments')
-        .update({ tracking_code: trackingCode, label_url: labelUrl, status: shipment.status === 'paid' ? 'generated' : shipment.status })
+        .update({ tracking_code: trackingCode, label_url: labelUrl, status: newStatus })
         .eq('id', shipment.id);
 
       await supabaseAdmin
@@ -1154,15 +1448,16 @@ router.get('/pedido/:orderId/status-frete', async (req, res) => {
         .eq('id', orderId);
 
       return res.json({
-        status: 'generated',
+        status: newStatus,
         tracking_code: trackingCode,
         label_url: labelUrl,
         shipment_id: shipment.id
       });
     }
 
+    const mappedStatus = shipment.status === 'paid' ? 'aguardando' : (shipment.status === 'generated' ? 'pronto_para_envio' : shipment.status);
     return res.json({
-      status: shipment.status,
+      status: mappedStatus,
       tracking_code: null,
       label_url: null,
       shipment_id: shipment.id,
@@ -1170,6 +1465,585 @@ router.get('/pedido/:orderId/status-frete', async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ error: error?.response?.data || error.message });
+  }
+});
+
+router.get('/status-frete/:id', async (req, res) => {
+  try {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    const rawToken = process.env.MELHOR_ENVIO_TOKEN || process.env.MELHOR_ENVIO_SECRET || '';
+    const token = typeof rawToken === 'string' ? rawToken.trim() : '';
+    if (!token) {
+      return res.status(500).json({ error: 'Token do Melhor Envio não configurado' });
+    }
+
+    const orderId = req.params.id;
+    const { data: shipments, error: shipErr } = await supabaseAdmin
+      .from('melhor_envio_shipments')
+      .select('*')
+      .eq('order_id', orderId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (shipErr || !shipments || shipments.length === 0) {
+      return res.status(200).json({
+        status: 'aguardando',
+        tracking_code: null,
+        label_url: null,
+        shipment_id: null,
+        me_id: null,
+        payment_status: null,
+        message: 'Aguardando geração de frete'
+      });
+    }
+    const shipment = shipments[0];
+
+    if (shipment.tracking_code) {
+      const mappedStatus2 = shipment.status === 'paid' ? 'aguardando' : (shipment.status === 'generated' ? 'pronto_para_envio' : shipment.status);
+      return res.json({
+        status: mappedStatus2,
+        tracking_code: shipment.tracking_code,
+        label_url: shipment.label_url,
+        shipment_id: shipment.id,
+        me_id: shipment.me_shipment_id || null,
+        payment_status: shipment.payment_status || null
+      });
+    }
+
+    const meHeaders = {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'User-Agent': 'Rosia Backend (contato@rosia.com.br)'
+    };
+    const rawBaseUrlStatus = (process.env.MELHOR_ENVIO_API_URL || 'https://sandbox.melhorenvio.com.br/api/v2').trim().replace(/\/$/, '');
+    const baseUrl = rawBaseUrlStatus.includes('/api/v2') ? rawBaseUrlStatus.replace(/\/api\/v2.*$/, '/api/v2') : `${rawBaseUrlStatus}/api/v2`;
+
+    const searchParams = {};
+    if (shipment.cart_item_id) {
+      searchParams.orders = [shipment.cart_item_id];
+    }
+
+    let ordersResp = [];
+    try {
+      const resp = await axios.get(`${baseUrl}/me/orders/search`, { headers: meHeaders, params: searchParams });
+      ordersResp = resp?.data?.orders || (Array.isArray(resp?.data) ? resp.data : []);
+    } catch (err) {
+      const code = err?.response?.status || 500;
+      if (code === 429) {
+        return res.status(429).json({ status: 'processando_me', tracking_code: null, label_url: null, shipment_id: shipment.id, me_id: shipment.me_shipment_id || null, payment_status: shipment.payment_status || null, message: 'Limite de taxa atingido. Tente novamente.' });
+      }
+      if (code === 404 || code === 422) {
+        return res.status(202).json({ status: 'processando_me', tracking_code: null, label_url: null, shipment_id: shipment.id, me_id: shipment.me_shipment_id || null, payment_status: shipment.payment_status || null, message: 'Etiqueta em processamento no Melhor Envio' });
+      }
+      return res.status(500).json({ error: err?.response?.data || err.message });
+    }
+    let trackingCode = null;
+    let labelUrl = null;
+    let newStatus = shipment.status;
+    if (Array.isArray(ordersResp)) {
+      const found = ordersResp.find(o => (o?.id && shipment.cart_item_id && String(o.id) === String(shipment.cart_item_id)) || (o?.tracking && o.tracking));
+      if (found) {
+        trackingCode = found.tracking || null;
+        labelUrl = found.label?.url || found.label_url || null;
+        const externalStatus = found?.status || null;
+        if (externalStatus) {
+          const statusMap = { pending: 'aguardando', released: 'pronto_para_envio', posted: 'enviado', delivered: 'entregue', undelivered: 'devolvido', suspended: 'cancelado' };
+          newStatus = statusMap[String(externalStatus).toLowerCase()] || newStatus;
+        }
+        if (!labelUrl && (found?.id || shipment?.me_shipment_id || shipment?.cart_item_id)) {
+          try {
+            const idToPrint = found?.id || shipment?.me_shipment_id;
+            const printRes = await axios.post(`${baseUrl}/me/shipment/print`, { orders: [idToPrint] }, { headers: meHeaders });
+            const printData = idToPrint && printRes?.data && typeof printRes.data === 'object' ? (printRes.data[idToPrint] || null) : null;
+            if (printData && typeof printData === 'object') {
+              labelUrl = printData?.label_url || printData?.label?.url || labelUrl;
+            } else {
+              const printOrders = printRes?.data?.orders || (Array.isArray(printRes?.data) ? printRes.data : []);
+              if (Array.isArray(printOrders) && printOrders.length > 0) {
+                labelUrl = printOrders[0]?.label?.url || printOrders[0]?.label_url || labelUrl;
+              }
+            }
+          } catch (e) {
+            console.error('Erro ao obter label via print:', e?.response?.data || e?.message);
+          }
+        }
+      }
+    }
+
+    if (trackingCode) {
+      await supabaseAdmin
+        .from('melhor_envio_shipments')
+        .update({ tracking_code: trackingCode, label_url: labelUrl, status: newStatus })
+        .eq('id', shipment.id);
+
+      await supabaseAdmin
+        .from('orders')
+        .update({ tracking_code: trackingCode })
+        .eq('id', orderId);
+
+      return res.json({
+        status: newStatus,
+        tracking_code: trackingCode,
+        label_url: labelUrl,
+        shipment_id: shipment.id
+      });
+    }
+
+    const mappedStatus3 = shipment.status === 'paid' ? 'aguardando' : (shipment.status === 'generated' ? 'pronto_para_envio' : shipment.status);
+    return res.json({
+      status: mappedStatus3,
+      tracking_code: null,
+      label_url: null,
+      shipment_id: shipment.id,
+      me_id: shipment.me_shipment_id || null,
+      payment_status: shipment.payment_status || null,
+      message: 'Rastreio ainda não disponível'
+    });
+  } catch (error) {
+    const code = error?.response?.status || 500;
+    if (code === 404 || code === 422) {
+      return res.status(202).json({ status: 'processando_me', tracking_code: null, label_url: null, shipment_id: null, me_id: null, payment_status: null, message: 'Etiqueta em processamento no Melhor Envio' });
+    }
+    return res.status(500).json({ error: error?.response?.data || error.message });
+  }
+});
+
+router.get('/status-frete/:id/sync', async (req, res) => {
+  try {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    const rawToken = process.env.MELHOR_ENVIO_TOKEN || process.env.MELHOR_ENVIO_SECRET || '';
+    const token = typeof rawToken === 'string' ? rawToken.trim() : '';
+    if (!token) {
+      return res.status(500).json({ error: 'Token do Melhor Envio não configurado' });
+    }
+
+    const orderId = req.params.id;
+    const { data: shipments, error: shipErr } = await supabaseAdmin
+      .from('melhor_envio_shipments')
+      .select('*')
+      .eq('order_id', orderId)
+      .order('created_at', { ascending: false })
+      .limit(5);
+    if (shipErr || !shipments || shipments.length === 0) {
+      return res.status(404).json({ error: 'Envio não encontrado para este pedido' });
+    }
+    const shipment = shipments.find(s => !!s.tracking_code) || shipments[0];
+
+    if (shipment.tracking_code) {
+      const mappedStatus4 = shipment.status === 'paid' ? 'aguardando' : (shipment.status === 'generated' ? 'pronto_para_envio' : shipment.status);
+      return res.json({
+        status: mappedStatus4,
+        tracking_code: shipment.tracking_code,
+        label_url: shipment.label_url,
+        shipment_id: shipment.id
+      });
+    }
+    const meHeaders = {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'User-Agent': 'Rosia Backend (contato@rosia.com.br)'
+    };
+    const rawBaseUrlSync = (process.env.MELHOR_ENVIO_API_URL || 'https://sandbox.melhorenvio.com.br/api/v2').trim().replace(/\/$/, '');
+    const baseUrl = rawBaseUrlSync.includes('/api/v2') ? rawBaseUrlSync.replace(/\/api\/v2.*$/, '/api/v2') : `${rawBaseUrlSync}/api/v2`;
+
+    let targetMeId = shipment.me_shipment_id || null;
+    const key = (targetMeId ? `me:${targetMeId}` : `order:${orderId}`);
+    global.__meSyncLocks = global.__meSyncLocks || new Map();
+    const last = global.__meSyncLocks.get(key) || 0;
+    if (Date.now() - last < 4000) {
+      return res.status(202).json({ success: false, status: 'processando_me', me_id: targetMeId || null });
+    }
+    global.__meSyncLocks.set(key, Date.now());
+    if (!targetMeId) {
+      try {
+        const qParam = shipment.recipient_document || shipment.recipient_email || null;
+        if (qParam) {
+          const searchResp = await axios.get(`${baseUrl}/me/orders/search`, { headers: meHeaders, params: { q: qParam } });
+          const foundOrder = searchResp?.data?.orders?.[0] || (Array.isArray(searchResp?.data) ? searchResp.data[0] : null) || null;
+          if (foundOrder?.id) {
+            targetMeId = foundOrder.id;
+            await supabaseAdmin
+              .from('melhor_envio_shipments')
+              .update({ me_shipment_id: foundOrder.id })
+              .eq('order_id', orderId);
+          }
+        }
+      } catch (_) {}
+    }
+
+    let trackingCode = null;
+    let labelUrl = null;
+    try {
+      if (targetMeId) {
+        const checkRes = await axios.get(`${baseUrl}/me/orders/${targetMeId}`, { headers: meHeaders });
+        const meData = checkRes?.data;
+        trackingCode = meData?.tracking || null;
+        labelUrl = meData?.label?.url || meData?.label_url || null;
+      }
+    } catch (_) {}
+
+    if (!trackingCode && targetMeId) {
+      try {
+        await axios.post(`${baseUrl}/me/shipment/generate`, { orders: [targetMeId] }, { headers: meHeaders });
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const retryRes = await axios.get(`${baseUrl}/me/orders/${targetMeId}`, { headers: meHeaders });
+        trackingCode = retryRes?.data?.tracking || null;
+        labelUrl = retryRes?.data?.label?.url || retryRes?.data?.label_url || null;
+      } catch (_) {}
+    }
+
+    const newStatus = trackingCode ? 'pronto_para_envio' : 'processando_me';
+    await supabaseAdmin
+      .from('melhor_envio_shipments')
+      .update({
+        tracking_code: trackingCode,
+        label_url: labelUrl,
+        status: newStatus,
+        updated_at: new Date()
+      })
+      .eq('order_id', orderId);
+
+    if (trackingCode) {
+      await supabaseAdmin
+        .from('orders')
+        .update({ tracking_code: trackingCode, status: 'processando' })
+        .eq('id', orderId);
+    }
+
+    return res.json({
+      success: true,
+      tracking: trackingCode,
+      status: newStatus,
+      me_id: targetMeId || null,
+      message: trackingCode ? 'Sincronizado!' : 'Em processamento no Melhor Envio.'
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error?.response?.data || error.message });
+  }
+});
+
+router.post('/imprimir-etiqueta/:orderId', async (req, res) => {
+  try {
+    const rawToken = process.env.MELHOR_ENVIO_TOKEN || process.env.MELHOR_ENVIO_SECRET || '';
+    const token = typeof rawToken === 'string' ? rawToken.trim() : '';
+    if (!token) {
+      return res.status(500).json({ success: false, message: 'Token do Melhor Envio não configurado' });
+    }
+
+    const { orderId } = req.params;
+    const meHeaders = {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'User-Agent': 'Rosia Backend (contato@rosia.com.br)'
+    };
+    const rawBaseUrl = (process.env.MELHOR_ENVIO_API_URL || 'https://sandbox.melhorenvio.com.br/api/v2').trim().replace(/\/$/, '');
+    const baseUrl = rawBaseUrl.includes('/api/v2') ? rawBaseUrl.replace(/\/api\/v2.*$/, '/api/v2') : `${rawBaseUrl}/api/v2`;
+
+    let idToPrint = null;
+    const { data: shipments } = await supabaseAdmin
+      .from('melhor_envio_shipments')
+      .select('id, order_id, me_shipment_id, cart_item_id, label_url, status')
+      .eq('order_id', orderId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (Array.isArray(shipments) && shipments.length > 0) {
+      idToPrint = shipments[0]?.me_shipment_id || shipments[0]?.cart_item_id || null;
+    }
+    if (!idToPrint) {
+      idToPrint = orderId;
+    }
+    console.log('PRINT ID RESOLVIDO:', idToPrint);
+    if (!idToPrint) {
+      return res.status(404).json({ success: false, message: 'ID do envio não encontrado para impressão' });
+    }
+
+    const response = await axios.post(`${baseUrl}/me/shipment/print`, { orders: [idToPrint] }, { headers: meHeaders });
+
+    let labelUrl = null;
+    const keyed = idToPrint && response?.data && typeof response.data === 'object' ? (response.data[idToPrint] || null) : null;
+    if (keyed && typeof keyed === 'object') {
+      labelUrl = keyed?.label_url || keyed?.label?.url || keyed?.url || null;
+    } else {
+      labelUrl = response?.data?.url || response?.data?.label?.url || null;
+      const ordersArr = response?.data?.orders || (Array.isArray(response?.data) ? response.data : []);
+      if (!labelUrl && Array.isArray(ordersArr) && ordersArr.length > 0) {
+        const first = ordersArr[0];
+        labelUrl = first?.label_url || first?.label?.url || null;
+      }
+    }
+
+    if (!labelUrl) {
+      return res.status(202).json({ success: false, message: 'Etiqueta em processamento. Tente novamente.' });
+    }
+
+    if (Array.isArray(shipments) && shipments.length > 0) {
+      await supabaseAdmin
+        .from('melhor_envio_shipments')
+        .update({ label_url: labelUrl, status: 'pronto_para_envio' })
+        .eq('id', shipments[0].id);
+    }
+
+    return res.json({ success: true, url: labelUrl });
+  } catch (error) {
+    console.error('ERRO AO GERAR ETIQUETA:', error?.response?.data || error.message);
+    const code = error?.response?.status || 500;
+    if (code === 404 || code === 422) {
+      return res.status(202).json({ success: false, message: 'Etiqueta em processamento no Melhor Envio' });
+    }
+    return res.status(500).json({ success: false, message: 'Falha ao gerar link da etiqueta' });
+  }
+});
+
+router.get('/status-frete/sync', shippingController.apenasSincronizar);
+router.get('/sync', shippingController.apenasSincronizar);
+
+router.post('/pagar-envio/:id', shippingController.pagarESincronizar);
+
+router.post('/pagar-envio', shippingController.pagarESincronizar);
+
+// Debug: visualizar payload enviado ao /me/cart antes de chamar a API
+router.get('/debug/me-cart-payload/:orderId', async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { data: order } = await supabaseAdmin
+      .from('orders')
+      .select('id, items, shipping_address, total, user_id, google_user_profile_id, user_info')
+      .eq('id', orderId)
+      .single();
+    if (!order) return res.status(404).json({ error: 'Pedido não encontrado' });
+
+    let profile = null;
+    if (order.google_user_profile_id) {
+      const { data: gp } = await supabaseAdmin
+        .from('google_user_profiles')
+        .select('nome, cpf, email, telefone, data_nascimento')
+        .eq('id', order.google_user_profile_id)
+        .maybeSingle();
+      profile = gp || null;
+    }
+
+    const addr = order.shipping_address || {};
+    const sender = buildSender();
+    const recipient = {
+      name: profile?.nome || order.user_info?.name || 'Cliente',
+      document: profile?.cpf || order.user_info?.cpf || null,
+      email: profile?.email || order.user_info?.email || null,
+      phone: profile?.telefone || order.user_info?.phone || process.env.DEFAULT_RECIPIENT_PHONE || '11999999999',
+      company: null,
+      birth_date: profile?.data_nascimento || null,
+      street: addr.logradouro || null,
+      number: String(addr.numero || ''),
+      complement: addr.complemento || null,
+      neighborhood: addr.bairro || null,
+      city: addr.cidade || null,
+      state: addr.estado || null,
+      postal_code: addr.cep || null,
+      country: 'BR'
+    };
+
+    const vols = buildVolumes(order.items || [], null);
+    function normalizeMoney(v) { const n = Number(v); return Number.isFinite(n) ? Number(n.toFixed(2)) : 0; }
+    let productsPayload = [];
+    const { data: orderItemsData } = await supabaseAdmin
+      .from('order_items')
+      .select('product_name, unit_price, quantity')
+      .eq('order_id', order.id);
+    if (Array.isArray(orderItemsData) && orderItemsData.length > 0) {
+      productsPayload = orderItemsData.map(oi => ({ name: oi.product_name || 'Produto Comercial', quantity: Number(oi.quantity) || 1, unitary_value: normalizeMoney(oi.unit_price) }));
+    } else if (Array.isArray(order.items)) {
+      productsPayload = order.items.map(it => ({ name: it.product_name || 'Produto Comercial', quantity: Number(it.quantity) || 1, unitary_value: normalizeMoney(it.product_price || it.total || 0) }));
+    }
+    const cleanProducts = productsPayload.map(p => ({ name: String(p.name || '').substring(0, 50), quantity: Number(p.quantity), unitary_value: Number(p.unitary_value) }));
+    const declaredTotal = cleanProducts.reduce((sum, p) => sum + (Number(p.unitary_value) * Number(p.quantity)), 0);
+    function onlyDigits(v) { return (v == null ? '' : String(v)).replace(/\D/g, ''); }
+    const finalVolumes = (Array.isArray(vols) ? vols : []).map((v, idx) => ({ height: Number(v.height), width: Number(v.width), length: Number(v.length), weight: Number(v.weight), products: idx === 0 ? cleanProducts : [] }));
+    const forcedFromPostal = onlyDigits(process.env.SANDBOX_FORCE_FROM_CEP || '');
+    const forcedToPostal = onlyDigits(process.env.SANDBOX_FORCE_TO_CEP || '');
+    const payload = {
+      service: Number(process.env.SANDBOX_DEFAULT_SERVICE || 3),
+      from: { name: sender.name, postal_code: forcedFromPostal || onlyDigits(sender.postal_code), address: sender.street, number: sender.number, complement: sender.complement, district: sender.neighborhood, city: sender.city, state_abbr: sender.state, country: sender.country, country_id: 'BR', email: sender.email, document: onlyDigits(sender.document), phone: onlyDigits(sender.phone) },
+      to: { name: recipient.name, postal_code: forcedToPostal || onlyDigits(recipient.postal_code), address: recipient.street, number: recipient.number, complement: recipient.complement, district: recipient.neighborhood, city: recipient.city, state_abbr: recipient.state, country: recipient.country, country_id: 'BR', email: recipient.email, document: onlyDigits(recipient.document || ''), phone: onlyDigits(recipient.phone) },
+      volumes: finalVolumes,
+      options: { insurance_value: normalizeMoney(declaredTotal || (order.total || 0)), non_commercial: true }
+    };
+    return res.json(payload);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/pedido/:orderId/validar-envio', async (req, res) => {
+  try {
+    const rawToken = process.env.MELHOR_ENVIO_TOKEN || process.env.MELHOR_ENVIO_SECRET || '';
+    const token = typeof rawToken === 'string' ? rawToken.trim() : '';
+    if (!token) {
+      return res.status(500).json({ error: 'Token do Melhor Envio não configurado' });
+    }
+
+    const { orderId } = req.params;
+    const { data: order, error: orderErr } = await supabaseAdmin
+      .from('orders')
+      .select('id, items, shipping_address, total, user_id, google_user_profile_id, user_info')
+      .eq('id', orderId)
+      .single();
+    if (orderErr || !order) {
+      return res.status(404).json({ error: 'Pedido não encontrado' });
+    }
+
+    let profile = null;
+    if (order.google_user_profile_id) {
+      const { data: gp } = await supabaseAdmin
+        .from('google_user_profiles')
+        .select('nome, cpf, email, telefone, data_nascimento')
+        .eq('id', order.google_user_profile_id)
+        .maybeSingle();
+      profile = gp || null;
+    }
+    if (!profile && order.user_id) {
+      const { data: up } = await supabaseAdmin
+        .from('user_profiles')
+        .select('name, cpf, birth_date, email, phone')
+        .eq('user_id', order.user_id)
+        .maybeSingle();
+      profile = up || null;
+    }
+
+    const addr = order.shipping_address || {};
+    const sender = buildSender();
+    const recipient = {
+      name: profile?.nome || profile?.name || order.user_info?.name || 'Cliente',
+      document: profile?.cpf || order.user_info?.cpf || null,
+      email: profile?.email || order.user_info?.email || null,
+      phone: profile?.phone || order.user_info?.phone || process.env.DEFAULT_RECIPIENT_PHONE || '11999999999',
+      street: addr.logradouro || null,
+      number: String(addr.numero || ''),
+      complement: addr.complemento || null,
+      neighborhood: addr.bairro || null,
+      city: addr.cidade || null,
+      state: addr.estado || null,
+      postal_code: addr.cep || null,
+      country: 'BR'
+    };
+
+    const vols = buildVolumes(order.items || [], null);
+    function normalizeMoney(v) { const n = Number(v); return Number.isFinite(n) ? Number(n.toFixed(2)) : 0; }
+    let productsPayload = [];
+    const { data: orderItemsData } = await supabaseAdmin
+      .from('order_items')
+      .select('product_name, unit_price, quantity')
+      .eq('order_id', order.id);
+    if (Array.isArray(orderItemsData) && orderItemsData.length > 0) {
+      productsPayload = orderItemsData.map(oi => ({ name: oi.product_name || 'Produto Comercial', quantity: Number(oi.quantity) || 1, unitary_value: normalizeMoney(oi.unit_price) }));
+    } else if (Array.isArray(order.items)) {
+      productsPayload = order.items.map(it => ({ name: it.product_name || 'Produto Comercial', quantity: Number(it.quantity) || 1, unitary_value: normalizeMoney(it.product_price || it.total || 0) }));
+    }
+    const declaredTotal = productsPayload.reduce((sum, p) => sum + (Number(p.unitary_value) * Number(p.quantity)), 0);
+    const issues = [];
+    if (!recipient.phone) issues.push('Falta telefone do destinatário');
+    if (!Array.isArray(productsPayload) || productsPayload.length === 0) issues.push('Nenhum produto encontrado');
+    if (productsPayload.some(p => !(Number(p.quantity) > 0))) issues.push('Produto com quantidade inválida');
+    if (productsPayload.some(p => !(Number(p.unitary_value) > 0))) issues.push('Produto com valor inválido');
+
+    return res.json({
+      valid: issues.length === 0,
+      issues,
+      products: productsPayload,
+      volumes: vols,
+      insurance_value: normalizeMoney(declaredTotal || (order.total || 0)),
+      recipient_phone: recipient.phone || null
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error?.response?.data || error.message });
+  }
+});
+
+router.post('/pedido/:orderId/cotacao-me', async (req, res) => {
+  try {
+    const rawToken = process.env.MELHOR_ENVIO_TOKEN || process.env.MELHOR_ENVIO_SECRET || '';
+    const token = typeof rawToken === 'string' ? rawToken.trim() : '';
+    if (!token) {
+      return res.status(500).json({ error: 'Token do Melhor Envio não configurado' });
+    }
+    const { orderId } = req.params;
+    const { data: order, error: orderErr } = await supabaseAdmin
+      .from('orders')
+      .select('id, items, shipping_address, total, user_id, google_user_profile_id, user_info')
+      .eq('id', orderId)
+      .single();
+    if (orderErr || !order) {
+      return res.status(404).json({ error: 'Pedido não encontrado' });
+    }
+    let profile = null;
+    if (order.google_user_profile_id) {
+      const { data: gp } = await supabaseAdmin
+        .from('google_user_profiles')
+        .select('nome, cpf, email, telefone, data_nascimento')
+        .eq('id', order.google_user_profile_id)
+        .maybeSingle();
+      profile = gp || null;
+    }
+    if (!profile && order.user_id) {
+      const { data: up } = await supabaseAdmin
+        .from('user_profiles')
+        .select('name, cpf, birth_date, email, phone')
+        .eq('user_id', order.user_id)
+        .maybeSingle();
+      profile = up || null;
+    }
+    const addr = order.shipping_address || {};
+    const sender = buildSender();
+    const recipient = {
+      name: profile?.nome || profile?.name || order.user_info?.name || 'Cliente',
+      document: profile?.cpf || order.user_info?.cpf || null,
+      email: profile?.email || order.user_info?.email || null,
+      phone: profile?.phone || order.user_info?.phone || process.env.DEFAULT_RECIPIENT_PHONE || '11999999999',
+      street: addr.logradouro || null,
+      number: String(addr.numero || ''),
+      complement: addr.complemento || null,
+      neighborhood: addr.bairro || null,
+      city: addr.cidade || null,
+      state: addr.estado || null,
+      postal_code: addr.cep || null,
+      country: 'BR'
+    };
+    const vols = buildVolumes(order.items || [], req.body?.volumes);
+    function normalizeMoney(v) { const n = Number(v); return Number.isFinite(n) ? Number(n.toFixed(2)) : 0; }
+    const { data: orderItemsData } = await supabaseAdmin
+      .from('order_items')
+      .select('product_name, unit_price, quantity')
+      .eq('order_id', order.id);
+    let productsPayload = [];
+    if (Array.isArray(orderItemsData) && orderItemsData.length > 0) {
+      productsPayload = orderItemsData.map(oi => ({ name: oi.product_name || 'Produto Comercial', quantity: Number(oi.quantity) || 1, unitary_value: normalizeMoney(oi.unit_price) }));
+    } else if (Array.isArray(order.items)) {
+      productsPayload = order.items.map(it => ({ name: it.product_name || 'Produto Comercial', quantity: Number(it.quantity) || 1, unitary_value: normalizeMoney(it.product_price || it.total || 0) }));
+    }
+    const cleanProducts = productsPayload.map(p => ({ name: String(p.name || '').substring(0, 50), quantity: Number(p.quantity), unitary_value: Number(p.unitary_value) }));
+    const declaredTotal = cleanProducts.reduce((sum, p) => sum + (Number(p.unitary_value) * Number(p.quantity)), 0);
+    function onlyDigits(v) { return (v == null ? '' : String(v)).replace(/\D/g, ''); }
+    const volumesWithProducts = (Array.isArray(vols) ? vols : []).map((v, idx) => ({ height: Number(v.height), width: Number(v.width), length: Number(v.length), weight: Number(v.weight), products: idx === 0 ? cleanProducts : [] }));
+    const forcedFromPostal = onlyDigits(process.env.SANDBOX_FORCE_FROM_CEP || '');
+    const forcedToPostal = onlyDigits(process.env.SANDBOX_FORCE_TO_CEP || '');
+
+    const meHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': 'Rosia Backend (contato@rosia.com.br)' };
+    const rawBaseUrlCalcPublic = (process.env.MELHOR_ENVIO_API_URL || 'https://sandbox.melhorenvio.com.br/api/v2').trim().replace(/\/$/, '');
+    const baseUrl = rawBaseUrlCalcPublic.includes('/api/v2') ? rawBaseUrlCalcPublic.replace(/\/api\/v2.*$/, '/api/v2') : `${rawBaseUrlCalcPublic}/api/v2`;
+    const payload = { from: { name: sender.name, postal_code: forcedFromPostal || onlyDigits(sender.postal_code), address: sender.street, number: sender.number, complement: sender.complement, district: sender.neighborhood, city: sender.city, state_abbr: sender.state, country: sender.country, country_id: 'BR', email: sender.email, document: onlyDigits(sender.document), phone: onlyDigits(sender.phone) }, to: { name: recipient.name, postal_code: forcedToPostal || onlyDigits(recipient.postal_code), address: recipient.street, number: recipient.number, complement: recipient.complement, district: recipient.neighborhood, city: recipient.city, state_abbr: recipient.state, country: recipient.country, country_id: 'BR', email: recipient.email, document: onlyDigits(recipient.document || ''), phone: onlyDigits(recipient.phone) }, volumes: volumesWithProducts, options: { insurance_value: normalizeMoney(declaredTotal || (order.total || 0)), non_commercial: true } };
+    const resp = await axios.post(`${baseUrl}/me/shipment/calculate`, payload, { headers: meHeaders });
+    return res.json(resp.data);
+  } catch (error) {
+    const statusCode = error?.response?.status || 500;
+    if (statusCode === 422) {
+      return res.status(422).json({ error: 'Erro de validação na cotação', details: error?.response?.data });
+    }
+    if (error?.response?.data) {
+      return res.status(statusCode).json({ error: error.response.data });
+    }
+    return res.status(statusCode).json({ error: error.message });
   }
 });
 
