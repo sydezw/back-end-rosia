@@ -905,5 +905,48 @@ router.post('/:id/payment', async (req, res, next) => {
   }
 });
 
+router.post('/:id/payment/cancel', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const supabaseUserId = req.supabaseUser?.id || null;
+    const googleProfileId = req.user?.id || req.userId || null;
+    let order = null;
+    try {
+      const { data: byExact } = await supabaseAdmin
+        .from('orders')
+        .select('*')
+        .or(`id.eq.${id},external_reference.eq.${id},payment_id.eq.${id}`)
+        .maybeSingle();
+      order = byExact || null;
+    } catch {}
+    if (!order) {
+      try {
+        const short = (typeof id === 'string' ? id.split('-')[0] : '') || '';
+        const likePrefix = short.length >= 6 ? `${short}%` : `${id}%`;
+        const { data: byAlt } = await supabaseAdmin
+          .from('orders')
+          .select('*')
+          .or(`external_reference.eq.${id},payment_id.eq.${id},external_reference.ilike.${likePrefix}`)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        if (Array.isArray(byAlt) && byAlt.length > 0) order = byAlt[0];
+      } catch {}
+    }
+    if (!order || !(
+      (supabaseUserId && order.user_id === supabaseUserId) ||
+      (googleProfileId && order.google_user_profile_id === googleProfileId)
+    )) {
+      return res.status(404).json({ error: 'Pedido não encontrado', code: 'ORDER_NOT_FOUND' });
+    }
+    await supabaseAdmin
+      .from('orders')
+      .update({ payment_status: 'cancelado_usuario', updated_at: new Date().toISOString() })
+      .eq('id', order.id);
+    return res.json({ success: true, order: { id: order.id, status: order.status, payment_status: 'cancelado_usuario' } });
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;
 
