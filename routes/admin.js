@@ -13,23 +13,26 @@ const {
   generateUniqueFilename
 } = require('../config/storage');
 const { supabase, supabaseAdmin } = require('../config/supabase');
+const { logger } = require('../middleware/logger');
 const shippingController = require('../controllers/shippingController');
 
 /**
  * POST /admin/auth/login
- * Login específico para administradores usando apenas email
+ * Login de administrador com validação estrita de email e senha
  */
 router.post('/auth/login', async (req, res, next) => {
   try {
-    const { email } = req.body;
+    logger.debug('Admin login request received', { body: req.body });
+    const { email, password, senha } = req.body;
+    const providedPassword = password || senha;
 
-    if (!email) {
+    if (!email || !providedPassword) {
       return res.status(400).json({
-        error: 'Email é obrigatório'
+        success: false,
+        message: 'Credenciais inválidas'
       });
     }
 
-    // Verificar se o email existe na tabela admin_users
     const { data: adminCheck, error: adminError } = await supabaseAdmin
       .from('admin_users')
       .select('id, email, user_id, active')
@@ -38,44 +41,73 @@ router.post('/auth/login', async (req, res, next) => {
       .single();
 
     if (adminError || !adminCheck) {
-      return res.status(403).json({
-        error: 'Acesso negado. Email não encontrado ou usuário inativo.',
-        code: 'ADMIN_NOT_FOUND'
+      logger.warn('Admin login - admin not found or inactive', { email });
+      return res.status(401).json({
+        success: false,
+        message: 'Credenciais inválidas'
       });
     }
 
-    // Buscar dados do usuário no Supabase Auth
-    const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(adminCheck.user_id);
-    
-    if (userError || !userData.user) {
-      return res.status(404).json({
-        error: 'Usuário não encontrado no sistema de autenticação',
-        code: 'USER_NOT_FOUND'
+    // Validar senha como user_id armazenado na tabela admin_users
+    const _match = String(providedPassword || '').trim() === String(adminCheck.user_id || '').trim();
+    const _providedLen = String(providedPassword || '').trim().length;
+    const _userIdLen = String(adminCheck.user_id || '').trim().length;
+    logger.debug('Admin login - comparing senha with user_id', {
+      match: _match,
+      providedLen: _providedLen,
+      userIdLen: _userIdLen
+    });
+    console.log('Admin login compare:', { match: _match, providedLen: _providedLen, userIdLen: _userIdLen });
+    if (String(providedPassword || '').trim() !== String(adminCheck.user_id || '').trim()) {
+      logger.warn('Admin login - user_id mismatch', { email });
+      return res.status(401).json({
+        success: false,
+        message: 'Credenciais inválidas'
       });
     }
 
-    // Gerar um token simples para a sessão admin (você pode usar JWT aqui se preferir)
+    const { data: userData } = await supabaseAdmin.auth.admin.getUserById(adminCheck.user_id);
+
     const adminToken = Buffer.from(`${adminCheck.id}:${adminCheck.email}:${Date.now()}`).toString('base64');
 
-    res.json({
+    return res.status(200).json({
       success: true,
       admin_token: adminToken,
       user: {
         id: adminCheck.user_id,
-        email: adminCheck.email,
-        name: userData.user.user_metadata?.name || userData.user.user_metadata?.full_name || 'Admin',
-        role: "admin",
-        permissions: ["products.create", "products.read", "products.update", "products.delete", "orders.read", "orders.update", "dashboard.read"],
-        avatar: userData.user.user_metadata?.avatar_url || null,
-        created_at: userData.user.created_at
+        name: userData?.user?.user_metadata?.name || userData?.user?.user_metadata?.full_name || 'Admin',
+        role: 'admin'
       },
       session: {
-        expires_at: Date.now() + (24 * 60 * 60 * 1000) // 24 horas
+        expires_at: Date.now() + (24 * 60 * 60 * 1000)
       }
     });
-
   } catch (error) {
-    next(error);
+    return res.status(500).json({ success: false, message: 'Erro interno do servidor' });
+  }
+});
+
+// Endpoint de diagnóstico para comparar senha com user_id (temporário)
+router.post('/auth/login/diagnose', async (req, res) => {
+  try {
+    const { email, password, senha } = req.body;
+    const providedPassword = password || senha || '';
+    const { data: adminCheck } = await supabaseAdmin
+      .from('admin_users')
+      .select('id,email,user_id,active')
+      .eq('email', email)
+      .eq('active', true)
+      .single();
+    const userId = adminCheck?.user_id || '';
+    const match = String(providedPassword).trim() === String(userId).trim();
+    return res.json({
+      found: !!adminCheck,
+      match,
+      providedLen: String(providedPassword).trim().length,
+      userIdLen: String(userId).trim().length
+    });
+  } catch (e) {
+    return res.status(500).json({ error: 'diagnose_failed' });
   }
 });
 
@@ -93,6 +125,106 @@ router.get('/auth/verify', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: 'Erro interno' });
+  }
+});
+
+router.get('/dashboard', async (req, res) => {
+  try {
+    const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const { data: monthOrders } = await supabaseAdmin
+      .from('orders')
+      .select('id,total,created_at,payment_status')
+      .gte('created_at', startOfMonth.toISOString())
+      .lt('created_at', startOfNextMonth.toISOString());
+
+  const chartMap = {};
+  (monthOrders || []).forEach(o => {
+    const status = String(o.payment_status || '').toLowerCase();
+    if (status === 'approved') {
+      const d = new Date(o.created_at);
+      const dayStr = d.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+      chartMap[dayStr] = Number((chartMap[dayStr] || 0)) + Number(o.total || 0);
+    }
+  });
+  const revenue_chart = Object.keys(chartMap).sort().map(date => ({ date, revenue: Number(chartMap[date]) }));
+
+  const [{ count: total_orders }, { count: total_products }, lowStockRes, approvedOrdersRes, recentOrdersRes, userProfilesCountRes, googleProfilesCountRes, recentUsersNormalRes, recentUsersGoogleRes] = await Promise.all([
+      supabaseAdmin.from('orders').select('*', { count: 'exact', head: true }),
+      supabaseAdmin.from('products').select('*', { count: 'exact', head: true }),
+      supabaseAdmin.from('product_variants').select('id').lte('stock', 3),
+      supabaseAdmin.from('orders').select('total,payment_status'),
+      supabaseAdmin.from('orders').select('id,total,status,created_at').order('created_at', { ascending: false }).limit(10),
+      supabaseAdmin.from('user_profiles').select('*', { count: 'exact', head: true }),
+      supabaseAdmin.from('google_user_profiles').select('*', { count: 'exact', head: true }),
+      supabaseAdmin.from('user_profiles').select('id,email,nome,created_at').order('created_at', { ascending: false }).limit(10),
+      supabaseAdmin.from('google_user_profiles').select('id,email,nome,created_at').order('created_at', { ascending: false }).limit(10)
+    ]);
+
+  const total_revenue = (Array.isArray(approvedOrdersRes?.data) ? approvedOrdersRes.data : []).reduce((s, o) => {
+    const status = String(o.payment_status || '').toLowerCase();
+    if (status === 'approved') return s + Number(o.total || 0);
+    return s;
+  }, 0);
+    const low_stock_products = Array.isArray(lowStockRes?.data) ? lowStockRes.data.length : 0;
+    const total_users = (userProfilesCountRes?.count || 0) + (googleProfilesCountRes?.count || 0);
+
+    const todayStr = now.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+    const orders_today = (Array.isArray(monthOrders) ? monthOrders : []).filter(o => {
+      const d = new Date(o.created_at);
+      return d.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }) === todayStr;
+    }).length;
+
+    const recent_users_all = [
+      ...(Array.isArray(recentUsersNormalRes?.data) ? recentUsersNormalRes.data.map(u => ({ id: u.id, email: u.email || null, name: u.nome || null, created_at: u.created_at, provider: 'local' })) : []),
+      ...(Array.isArray(recentUsersGoogleRes?.data) ? recentUsersGoogleRes.data.map(u => ({ id: u.id, email: u.email || null, name: u.nome || null, created_at: u.created_at, provider: 'google' })) : [])
+    ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 10);
+
+    const recent_orders = (Array.isArray(recentOrdersRes?.data) ? recentOrdersRes.data : []).map(o => ({ id: o.id, total: o.total, status: o.status, created_at: o.created_at }));
+
+    const { data: itemsData } = await supabaseAdmin
+      .from('order_items')
+      .select('product_name,quantity')
+      .limit(10000);
+    const topMap = {};
+    (itemsData || []).forEach(it => {
+      const name = it.product_name || 'Item';
+      const qty = Number(it.quantity || 0);
+      topMap[name] = (topMap[name] || 0) + qty;
+    });
+    let top_products = Object.keys(topMap).map(name => ({ name, count: topMap[name] }));
+    top_products.sort((a, b) => b.count - a.count);
+    top_products = top_products.slice(0, 10);
+
+    const new_users_today = recent_users_all.filter(u => new Date(u.created_at).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }) === todayStr).length;
+
+    const { count: pending_orders_count } = await supabaseAdmin
+      .from('orders')
+      .select('*', { count: 'exact', head: true })
+      .in('status', ['processing','pending','pendente','aguardando']);
+
+    res.json({
+      success: true,
+      data: {
+        stats: {
+          total_users,
+          total_orders: total_orders || 0,
+          total_products: total_products || 0,
+          total_revenue,
+          pending_orders: pending_orders_count || 0,
+          low_stock_products,
+          new_users_today,
+          orders_today
+        },
+        revenue_chart,
+        top_products,
+        recent_orders,
+        recent_users: recent_users_all
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Erro ao gerar dashboard' });
   }
 });
 

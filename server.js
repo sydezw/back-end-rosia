@@ -30,7 +30,7 @@ const singleOrderRoutes = require('./routes/order');
 // Importar middlewares
 const errorHandler = require('./middleware/errorHandler');
 const { authenticateToken, authenticateUser, authenticateSupabaseGoogleUser } = require('./middleware/auth');
-const { requestLogger, errorLogger, logger } = require('./middleware/logger');
+const { requestLogger, errorLogger, logger, redactBody, redactHeaders } = require('./middleware/logger');
 
 // Importar configuração do storage
 const { createBucketIfNotExists } = require('./config/storage');
@@ -242,7 +242,7 @@ app.post('/api/pix/create', (req, res) => {
 
 app.use('/api/payments/mp/process', (req, res, next) => {
   console.log('➡️', req.method, req.path);
-  console.log('📦 BODY RECEBIDO:', req.body);
+  console.log('📦 BODY RECEBIDO:', redactBody(req.body));
   console.log('Headers:', req.headers['content-type']);
   if (!req.body) {
     return res.status(400).json({ error: 'Body vazio' });
@@ -269,8 +269,8 @@ app.options('/process_payment', cors(corsOptionsForOrdersCard), (req, res) => {
   res.sendStatus(200);
 });
 app.post('/process_payment', (req, res) => {
-  console.log('HEADERS:', req.headers);
-  console.log('BODY:', req.body);
+  console.log('HEADERS:', redactHeaders(req.headers));
+  console.log('BODY:', redactBody(req.body));
   paymentsRoutes.handle(req, res, () => {});
 });
 
@@ -279,8 +279,8 @@ app.options('/api/process_payment', cors(corsOptionsForOrdersCard), (req, res) =
   res.sendStatus(200);
 });
 app.post('/api/process_payment', (req, res) => {
-  console.log('HEADERS:', req.headers);
-  console.log('BODY:', req.body);
+  console.log('HEADERS:', redactHeaders(req.headers));
+  console.log('BODY:', redactBody(req.body));
   paymentsRoutes.handle(req, res, () => {});
 });
 
@@ -293,6 +293,8 @@ app.use('/api/test-auth', testAuthRoutes);
 app.use('/api/google-users', googleUsersRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/order', singleOrderRoutes);
+// Alias para rotas administrativas com prefixo /api
+app.use('/api/admin', adminRoutes);
 
 // Rotas sem prefixo /api (para compatibilidade)
 app.use('/auth', authRoutes);
