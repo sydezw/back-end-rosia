@@ -824,7 +824,7 @@ router.put('/orders/:id/status', async (req, res) => {
     }
 
     // Buscar pedido atual
-    const { data: currentOrder, error: fetchError } = await supabase
+    const { data: currentOrder, error: fetchError } = await supabaseAdmin
       .from('orders')
       .select('*')
       .eq('id', id)
@@ -855,14 +855,14 @@ router.put('/orders/:id/status', async (req, res) => {
       if (currentOrder.items && Array.isArray(currentOrder.items)) {
         for (const item of currentOrder.items) {
           if (item.product_id && item.quantity) {
-            const { data: product, error: productError } = await supabase
+            const { data: product, error: productError } = await supabaseAdmin
               .from('products')
               .select('stock')
               .eq('id', item.product_id)
               .single();
 
             if (!productError && product) {
-              await supabase
+              await supabaseAdmin
                 .from('products')
                 .update({ stock: product.stock + item.quantity })
                 .eq('id', item.product_id);
@@ -873,7 +873,7 @@ router.put('/orders/:id/status', async (req, res) => {
     }
 
     // Atualizar pedido
-    const { data: updatedOrder, error: updateError } = await supabase
+    const { data: updatedOrder, error: updateError } = await supabaseAdmin
       .from('orders')
       .update(updateData)
       .eq('id', id)
