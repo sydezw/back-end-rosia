@@ -2,6 +2,7 @@ const express = require('express');
 const { supabase, supabaseAdmin } = require('../config/supabase');
 const { getMercadoPago } = require('../config/mercadopago');
 const router = express.Router();
+const DEFAULT_PRODUCT_IMAGE_URL = 'https://via.placeholder.com/250?text=Sem+Imagem';
 
 function formatShippingAddress(addr) {
   if (!addr || typeof addr !== 'object') return null;
@@ -62,24 +63,62 @@ router.get('/', async (req, res, next) => {
 
     const { count: totalCount } = await countQuery;
 
+    // Preparar prévias de itens com imagens
+    const orderIds = Array.isArray(orders) ? orders.map(o => o.id).filter(Boolean) : [];
+    let itemsPreviewMap = new Map();
+    if (orderIds.length > 0) {
+      try {
+        const { data: orderItemsRows } = await supabaseAdmin
+          .from('order_items')
+          .select('order_id,product_id')
+          .in('order_id', orderIds);
+        const byOrder = new Map();
+        (orderItemsRows || []).forEach(row => {
+          const arr = byOrder.get(row.order_id) || [];
+          if (row.product_id && !arr.includes(row.product_id)) arr.push(row.product_id);
+          byOrder.set(row.order_id, arr);
+        });
+        const allProductIds = Array.from(byOrder.values()).flat().filter(Boolean);
+        let imgMap = new Map();
+        if (allProductIds.length > 0) {
+          const { data: imagesRows } = await supabaseAdmin
+            .from('product_images')
+            .select('product_id,image_url,position,created_at')
+            .in('product_id', allProductIds)
+            .order('position', { ascending: true })
+            .order('created_at', { ascending: true });
+          (imagesRows || []).forEach(img => {
+            if (!imgMap.has(img.product_id)) imgMap.set(img.product_id, img.image_url);
+          });
+        }
+        itemsPreviewMap = new Map(
+          Array.from(byOrder.entries()).map(([orderId, pids]) => [
+            orderId,
+            pids.map(pid => imgMap.get(pid) || null).filter(Boolean).slice(0, 3)
+          ])
+        );
+      } catch {}
+    }
+
     // Formatar resposta
     const formattedOrders = orders.map(order => ({
       id: order.id,
       total: order.total,
       status: order.status,
       items_count: order.items ? order.items.length : 0,
+      items_preview: itemsPreviewMap.get(order.id) || [],
       created_at: order.created_at,
       updated_at: order.updated_at,
       payment_method: order.payment_method
     }));
 
-    const orderIds = Array.isArray(orders) ? orders.map(o => o.id).filter(Boolean) : [];
+    const orderIds2 = Array.isArray(orders) ? orders.map(o => o.id).filter(Boolean) : [];
     let manualStatus = [];
-    if (orderIds.length > 0) {
+    if (orderIds2.length > 0) {
       const { data: manualRows } = await supabaseAdmin
         .from('order_status_history')
         .select('order_id,status')
-        .in('order_id', orderIds)
+        .in('order_id', orderIds2)
         .eq('source', 'manual');
       manualStatus = Array.isArray(manualRows) ? manualRows.map(r => ({ order_id: r.order_id, status: r.status })) : [];
     }
@@ -258,6 +297,28 @@ router.get('/:id', async (req, res, next) => {
         color: it.color ?? it.selected_color ?? null
       }));
     }
+
+    try {
+      const productIds = Array.isArray(items) ? items.map(i => i.product_id).filter(Boolean) : [];
+      if (productIds.length > 0) {
+        const { data: imagesRows } = await supabaseAdmin
+          .from('product_images')
+          .select('product_id,image_url,position,created_at')
+          .in('product_id', productIds)
+          .order('position', { ascending: true })
+          .order('created_at', { ascending: true });
+        const imgMap = new Map();
+        (imagesRows || []).forEach(img => {
+          if (!imgMap.has(img.product_id)) {
+            imgMap.set(img.product_id, img.image_url);
+          }
+        });
+        items = items.map(it => ({
+          ...it,
+          image_url: imgMap.get(it.product_id) || null
+        }));
+      }
+    } catch {}
 
     let customer = { name: null, cpf: null, birth_date: null };
     try {
