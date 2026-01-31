@@ -1,4 +1,4 @@
-const { supabase } = require('../config/supabase');
+const { supabase, supabaseAdmin } = require('../config/supabase');
 
 class GoogleUsersController {
     // Buscar perfil completo do usuário Google (dados pessoais + endereço)
@@ -66,7 +66,7 @@ class GoogleUsersController {
 
             // Validar CPF se fornecido
             if (profile.cpf) {
-                const { data: existingCpf } = await supabase
+                const { data: existingCpf } = await supabaseAdmin
                     .from('google_user_profiles')
                     .select('id')
                     .eq('cpf', profile.cpf)
@@ -81,7 +81,7 @@ class GoogleUsersController {
             }
 
             // Atualizar perfil existente
-            const { data: profileData, error: profileError } = await supabase
+            const { data: profileData, error: profileError } = await supabaseAdmin
                 .from('google_user_profiles')
                 .update({
                     nome: profile.nome,
@@ -104,7 +104,7 @@ class GoogleUsersController {
 
             // Verificar se já existe endereço
             console.log('🔍 [updateAddress] Verificando endereço existente para user_id:', googleUser.id);
-            const { data: existingAddress, error: searchError } = await supabase
+            const { data: existingAddress, error: searchError } = await supabaseAdmin
                 .from('google_user_addresses')
                 .select('id')
                 .eq('google_user_id', googleUser.id)
@@ -119,7 +119,7 @@ class GoogleUsersController {
             let addressData;
             if (existingAddress) {
                 // Atualizar endereço existente
-                const { data, error: addressError } = await supabase
+                const { data, error: addressError } = await supabaseAdmin
                     .from('google_user_addresses')
                     .update({
                         logradouro: address.logradouro,
@@ -143,7 +143,7 @@ class GoogleUsersController {
                 addressData = data;
             } else {
                 // Criar novo endereço
-                const { data, error: addressError } = await supabase
+                const { data, error: addressError } = await supabaseAdmin
                      .from('google_user_addresses')
                      .insert({
                         google_user_id: googleUser.id,
@@ -207,7 +207,7 @@ class GoogleUsersController {
 
             // Validar CPF se fornecido
             if (cpf) {
-                const { data: existingCpf } = await supabase
+                const { data: existingCpf } = await supabaseAdmin
                     .from('google_user_profiles')
                     .select('id')
                     .eq('cpf', cpf)
@@ -222,7 +222,7 @@ class GoogleUsersController {
             }
 
             // Atualizar dados pessoais
-            const { data: profileData, error: profileError } = await supabase
+            const { data: profileData, error: profileError } = await supabaseAdmin
                 .from('google_user_profiles')
                 .update({
                     nome,
@@ -295,7 +295,7 @@ class GoogleUsersController {
             }
 
             // Verificar se já existe endereço
-            const { data: existingAddress } = await supabase
+            const { data: existingAddress } = await supabaseAdmin
                 .from('google_user_addresses')
                 .select('id')
                 .eq('google_user_id', googleUser.id)
@@ -305,7 +305,7 @@ class GoogleUsersController {
             if (existingAddress) {
                 // Atualizar endereço existente
                 console.log('🔄 [updateAddress] Atualizando endereço existente ID:', existingAddress.id);
-                const { data, error: addressError } = await supabase
+                const { data, error: addressError } = await supabaseAdmin
                      .from('google_user_addresses')
                      .update({
                         cep,
@@ -349,7 +349,7 @@ class GoogleUsersController {
                 };
                 console.log('➕ [updateAddress] Dados para inserção:', insertData);
                 
-                const { data, error: addressError } = await supabase
+                const { data, error: addressError } = await supabaseAdmin
                     .from('google_user_addresses')
                     .insert(insertData)
                     .select()

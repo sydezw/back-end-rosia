@@ -27,7 +27,7 @@ router.get('/profile', authenticateUser, UsersController.getProfile);
 router.put('/profile', authenticateUser, UsersController.updateProfile);
 
 // ✅ CORREÇÃO: Rota profile-update usando autenticação JWT customizada (compatível com frontend)
-router.put('/profile-update', authenticateToken, UsersController.updateProfileComplete);
+router.put('/profile-update', authenticateUser, UsersController.updateProfileComplete);
 
 // Rota de upload de avatar
 router.post('/avatar', authenticateUser, upload.single('avatar'), UsersController.uploadAvatar);

@@ -231,7 +231,8 @@ const authenticateUser = async (req, res, next) => {
     
     req.user = user;
     req.userId = user.id;
-    req.provider = 'supabase';
+    const providerMeta = (user?.app_metadata?.provider) || (Array.isArray(user?.identities) ? user.identities[0]?.provider : null);
+    req.provider = providerMeta === 'google' ? 'google' : 'email';
     
     next();
     
