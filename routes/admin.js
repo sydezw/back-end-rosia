@@ -128,6 +128,14 @@ router.get('/auth/verify', async (req, res) => {
   }
 });
 
+router.post('/auth/logout', async (req, res) => {
+  try {
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Erro interno' });
+  }
+});
+
 router.get('/dashboard', async (req, res) => {
   try {
     const now = new Date();
@@ -2176,6 +2184,186 @@ router.post('/pedido/:orderId/cotacao-me', async (req, res) => {
       return res.status(statusCode).json({ error: error.response.data });
     }
     return res.status(statusCode).json({ error: error.message });
+  }
+});
+
+ 
+router.patch('/cep', async (req, res) => {
+  try {
+    const { region, time, price } = req.body || {};
+    if (!region || !time || price === undefined || price === null) {
+      return res.status(400).json({ success: false, error: 'Parâmetros obrigatórios ausentes' });
+    }
+
+    const regionUpper = String(region).toUpperCase();
+    const { data, error } = await supabaseAdmin
+      .from('cep')
+      .update({ region: regionUpper, time: String(time), price: Number(price) })
+      .eq('region', regionUpper)
+      .select();
+
+    if (error) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    if (!data || data.length === 0) {
+      return res.status(404).json({ success: false, error: 'Nenhuma linha atualizada' });
+    }
+    return res.json({ success: true, data: data[0] });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err?.message || 'Erro ao atualizar frete' });
+  }
+});
+
+ 
+router.post('/cep', async (req, res) => {
+  try {
+    const { region, time, price } = req.body || {};
+    if (!region || !time || price === undefined || price === null) {
+      return res.status(400).json({ success: false, error: 'Parâmetros obrigatórios ausentes' });
+    }
+
+    const regionUpper = String(region).toUpperCase();
+    const { data, error } = await supabaseAdmin
+      .from('cep')
+      .insert({ region: regionUpper, time: String(time), price: Number(price) })
+      .select();
+
+    if (error) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    if (!data || data.length === 0) {
+      return res.status(400).json({ success: false, error: 'Falha ao inserir frete' });
+    }
+    return res.status(201).json({ success: true, data: data[0] });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err?.message || 'Erro ao adicionar frete' });
+  }
+});
+
+ 
+router.delete('/cep', async (req, res) => {
+  try {
+    const region = req.query?.region || req.body?.region;
+    if (!region) {
+      return res.status(400).json({ success: false, error: 'region é obrigatório' });
+    }
+
+    const regionUpper = String(region).toUpperCase();
+    const { error } = await supabaseAdmin
+      .from('cep')
+      .delete()
+      .eq('region', regionUpper);
+
+    if (error) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err?.message || 'Erro ao remover frete' });
+  }
+});
+
+router.patch('/shipping-company/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { name, description, active, cep_region, cep_time, cep_price } = req.body || {};
+    if (!id) {
+      return res.status(400).json({ success: false, error: 'id é obrigatório' });
+    }
+
+    const payload = {
+      ...(name !== undefined ? { name: String(name).trim() } : {}),
+      ...(description !== undefined ? { description: description ? String(description) : null } : {}),
+      ...(active !== undefined ? { active: Boolean(active) } : {}),
+      ...(cep_region !== undefined ? { cep_region: String(cep_region) } : {}),
+      ...(cep_time !== undefined ? { cep_time: String(cep_time) } : {}),
+      ...(cep_price !== undefined ? { cep_price: Number(cep_price) } : {})
+    };
+
+    const { data, error } = await supabaseAdmin
+      .from('shipping_company')
+      .update(payload)
+      .eq('id', id)
+      .select('*');
+
+    if (error) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    if (!data || data.length === 0) {
+      return res.status(404).json({ success: false, error: 'Transportadora não encontrada' });
+    }
+    return res.json({ success: true, data: data[0] });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err?.message || 'Erro ao atualizar transportadora' });
+  }
+});
+
+router.post('/shipping-company', async (req, res) => {
+  try {
+    const { name, description, active, cep_region, cep_time, cep_price } = req.body || {};
+    if (!name) {
+      return res.status(400).json({ success: false, error: 'name é obrigatório' });
+    }
+
+    const payload = {
+      name: String(name).trim(),
+      description: description ? String(description) : null,
+      active: Boolean(active),
+      cep_region: cep_region ? String(cep_region) : null,
+      cep_time: cep_time ? String(cep_time) : null,
+      cep_price: cep_price !== undefined && cep_price !== null ? Number(cep_price) : null
+    };
+
+    const { data, error } = await supabaseAdmin
+      .from('shipping_company')
+      .insert(payload)
+      .select('*');
+
+    if (error) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    if (!data || data.length === 0) {
+      return res.status(400).json({ success: false, error: 'Falha ao inserir transportadora' });
+    }
+    return res.status(201).json({ success: true, data: data[0] });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err?.message || 'Erro ao adicionar transportadora' });
+  }
+});
+
+router.delete('/shipping-company/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    if (!id) {
+      return res.status(400).json({ success: false, error: 'id é obrigatório' });
+    }
+
+    const { error } = await supabaseAdmin
+      .from('shipping_company')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err?.message || 'Erro ao remover transportadora' });
+  }
+});
+
+router.get('/shipping-company', async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('shipping_company')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    return res.json({ success: true, data: Array.isArray(data) ? data : [] });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err?.message || 'Erro ao listar transportadoras' });
   }
 });
 
